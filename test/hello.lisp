@@ -7,3 +7,7 @@
  printf
  "hello%i\n" (/ 10 2)
  )
+(setq x 6)
+(printf "hello%i\n" x)
+(setq x 7)
+(printf "hello%i\n" x)

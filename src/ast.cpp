@@ -99,7 +99,6 @@ llvm::Value *call(Llvm &vm, const std::string &fname, const Args &args)
 
   // Regular function.
   auto f = vm.module->getFunction(fname);
-  if (!f) std::cerr << fname << " is not a func" << std::endl;
   if (!f) return nullptr;
 
   std::vector<llvm::Value *> fargs;
@@ -113,14 +112,36 @@ llvm::Value *call(Llvm &vm, const std::string &fname, const Args &args)
 llvm::Value *Symbol::codegen(Llvm &vm)
 {
   auto it = vm.vars.find(ident);
-  if (it != std::end(vm.vars))
-    return it->second;
+  if (it != std::end(vm.vars)) {
+    if (it->second->getType()->isPtrOrPtrVectorTy())
+      return vm.builder.CreateLoad(it->second, ident);
+    else
+      return it->second;
+  }
 
   if (llvm::Value *v = call(vm, ident, std::vector<SExpr*>{}))
     return v;
 
   std::cerr << "Unknown function or variable: " << ident << std::endl;
   exit(1);
+}
+
+llvm::Value *alloc(Llvm &vm, SExpr *esym, SExpr *e)
+{
+  if (!esym->is_sym) {
+    std::cerr << "Can't assign to non-symbol" << std::endl;
+    exit(1);
+  }
+  
+  std::string &ident = static_cast<Symbol *>(esym)->ident;
+
+  llvm::Value *val = e->codegen(vm);
+  llvm::AllocaInst *alloc = new llvm::AllocaInst(
+      val->getType(), ident, vm.bb
+  );
+  vm.builder.CreateStore(val, alloc);
+  vm.vars[ident] = alloc;
+  return alloc;
 }
 
 llvm::Value *List::codegen(Llvm &vm)
@@ -135,6 +156,14 @@ llvm::Value *List::codegen(Llvm &vm)
         exit(1);
       }
       return if_statement(vm, items[1].get(), items[2].get(), items[3].get());
+    }
+
+    if (sym->ident == "setq") {
+      if (items.size() != 3) {
+        std::cerr << "bad setq" << std::endl;
+        exit(1);
+      }
+      return alloc(vm, items[1].get(), items[2].get());
     }
 
     auto it = vm.vars.find(sym->ident);
