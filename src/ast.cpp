@@ -126,22 +126,25 @@ llvm::Value *Symbol::codegen(Llvm &vm)
   exit(1);
 }
 
-llvm::Value *alloc(Llvm &vm, SExpr *esym, SExpr *e)
+llvm::Value *alloc(Llvm &vm, const std::string &ident, SExpr *e)
 {
-  if (!esym->is_sym) {
-    std::cerr << "Can't assign to non-symbol" << std::endl;
-    exit(1);
-  }
-  
-  std::string &ident = static_cast<Symbol *>(esym)->ident;
-
   llvm::Value *val = e->codegen(vm);
   llvm::AllocaInst *alloc = new llvm::AllocaInst(
-      val->getType(), ident, vm.bb
+      val->getType(), ident, vm.builder.GetInsertBlock()
   );
   vm.builder.CreateStore(val, alloc);
   vm.vars[ident] = alloc;
   return alloc;
+}
+
+llvm::Value *If::codegen(Llvm &vm)
+{
+  return if_statement(vm, cond.get(), t.get(), f.get());
+}
+
+llvm::Value *Setq::codegen(Llvm &vm)
+{
+  return alloc(vm, ident, expr.get());
 }
 
 llvm::Value *List::codegen(Llvm &vm)
@@ -149,27 +152,12 @@ llvm::Value *List::codegen(Llvm &vm)
   if (items.front()->is_sym) {
     Symbol *sym = static_cast<Symbol *>(items.front().get());
 
-    // Check for special keywords
-    if (sym->ident == "if") {
-      if (items.size() != 4) {
-        std::cerr << "bad if statement" << std::endl;
-        exit(1);
-      }
-      return if_statement(vm, items[1].get(), items[2].get(), items[3].get());
-    }
-
-    if (sym->ident == "setq") {
-      if (items.size() != 3) {
-        std::cerr << "bad setq" << std::endl;
-        exit(1);
-      }
-      return alloc(vm, items[1].get(), items[2].get());
-    }
-
+    // Check if it's a defined variable.
     auto it = vm.vars.find(sym->ident);
     if (it != std::end(vm.vars))
       return it->second;
 
+    // Maybe a function.
     std::vector<SExpr *> args;
     for (size_t i = 1; i < items.size(); i++)
       args.push_back(items[i].get());

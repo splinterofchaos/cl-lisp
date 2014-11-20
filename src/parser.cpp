@@ -61,6 +61,22 @@ static SExpr *list(Reader &r)
 
   if (items.size() == 1)
     return items.front().release();
+
+  if (items.front()->is_sym) {
+    Symbol *sym = static_cast<Symbol *>(items.front().get());
+    if (sym->ident == "if") {
+      if (items.size() != 4) r.error("bad if");
+      return new If(std::move(items[1]), std::move(items[2]), std::move(items[3]));
+    }
+
+    if (sym->ident == "setq") {
+      if (items.size() != 3) r.error("bad setq");
+      SExpr *esym = items[1].get();
+      if (!esym->is_sym) r.error("setq on non-symbol");
+      return new Setq(static_cast<Symbol *>(esym)->ident, std::move(items[2]));
+    }
+  }
+
   return new List(std::move(items));
 }
 
