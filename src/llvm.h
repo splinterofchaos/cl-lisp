@@ -30,6 +30,10 @@ struct Llvm
   llvm::Type *intTy();
   llvm::Value *getInt(int x, size_t size=sizeof(int)*8);
 
+  llvm::Type *stringTy() {
+    return llvm::Type::getInt8PtrTy(llvm::getGlobalContext());
+  }
+
   template<typename...Args>
   void registerExtern(llvm::Type *ret, const char *name, bool var, Args...args)
   {

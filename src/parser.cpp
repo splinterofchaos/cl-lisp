@@ -6,7 +6,15 @@ static String *string(Reader &r);
 static Symbol *symbol(Reader &r);
 static Int *num(Reader &r);
 static SExpr *atom(Reader &r);
+
+static Declfun *declfun(Reader &r);
+static Defun *defun(Reader &r);
+
 static SExpr *list(Reader &r);
+static SExpr *list_item(Reader &r);
+
+static std::string identifier(Reader &r);
+
 
 // A simple helper.
 static void skipwhite(Reader &r) {
@@ -44,38 +52,53 @@ SExpr *sexpr(Reader &r) {
   return list(r);
 }
 
+static SExpr *list_item(Reader &r)
+{
+  skipwhite(r);
+  SExpr *e = nullptr;
+  if (r.peek() == '(')
+    e = sexpr(r);
+  else
+    e = atom(r);
+  return e;
+}
+
 static SExpr *list(Reader &r)
 {
   skipwhite(r);
+
+  std::string id = identifier(r);
+
+  if (id == "if") {
+    SExpr *cond = list_item(r);
+    SExpr *t = list_item(r);
+    SExpr *f = list_item(r);
+    return new If(cond, t, f);
+  }
+  if (id == "setq") {
+    id = identifier(r);
+    if (id == "") r.error("invalid or no variable name");
+    SExprPtr e(list_item(r));
+    if (!e) r.error("no assignment value");
+    return new Setq(std::move(id), std::move(e));
+  }
+  if (id == "declfun") {
+    return declfun(r);
+  }
+  if (id == "defun")
+    return defun(r);
+
   List::Items items;
+  if (id != "") items.emplace_back(new Symbol(std::move(id)));
+
   while (skipwhite(r), r.peek() != EOF && r.peek() != ')') {
-    SExpr *e = nullptr;
-    if (r.peek() == '(')
-      e = sexpr(r);
-    else
-      e = atom(r);
-    if (!e)
-      return nullptr;
+    SExpr *e = list_item(r);
+    if (!e) return nullptr;
     items.emplace_back(e);
   }
 
   if (items.size() == 1)
     return items.front().release();
-
-  if (items.front()->is_sym) {
-    Symbol *sym = static_cast<Symbol *>(items.front().get());
-    if (sym->ident == "if") {
-      if (items.size() != 4) r.error("bad if");
-      return new If(std::move(items[1]), std::move(items[2]), std::move(items[3]));
-    }
-
-    if (sym->ident == "setq") {
-      if (items.size() != 3) r.error("bad setq");
-      SExpr *esym = items[1].get();
-      if (!esym->is_sym) r.error("setq on non-symbol");
-      return new Setq(static_cast<Symbol *>(esym)->ident, std::move(items[2]));
-    }
-  }
 
   return new List(std::move(items));
 }
@@ -117,15 +140,64 @@ String *string(Reader &r) {
   return new String{std::move(s)};
 }
 
-static Symbol *symbol(Reader &r)
+static Declfun *declfun(Reader &r)
 {
-  auto pred = [](char c) { return c != '(' && c != ')' && std::isgraph(c); };
+  std::string name = identifier(r);
+  if (name == "") r.error("declfun: need a function name");
+
+  auto f = new Declfun(std::move(name));
+
+  std::string ty;
+  while (ty = identifier(r), ty != "")
+    f->add_arg(std::move(ty));
+
+  return f;
+}
+
+static Defun *defun(Reader &r)
+{
+  std::string name = identifier(r);
+  if (name == "") r.error("defun: bad or no function name");
+
+  SExpr *earglist = list_item(r);
+  std::vector<std::string> args;
+  if (earglist && earglist->is_list) {
+    for (auto& i : static_cast<List *>(earglist)->items) {
+      if (!i->is_sym) r.error("arguments must be symbols");
+      args.emplace_back(std::move(static_cast<Symbol *>(i.get())->ident));
+    }
+  } else if (earglist && earglist->is_sym) {
+    args.emplace_back(std::move(static_cast<Symbol *>(earglist)->ident));
+  } else if (earglist) {
+    r.error("defun: bad argument list");
+  }
+
+  std::vector<SExprPtr> body;
+  SExpr *e;
+  while ((e = sexpr(r)))
+    body.emplace_back(e);
+
+  return new Defun(std::move(name), std::move(args), std::move(body));
+}
+
+std::string identifier(Reader &r)
+{
+  skipwhite(r);
+  auto pred = [](char c) {
+    return c != '(' && c != ')' && c != '"' && std::isgraph(c);
+  };
   if (!pred(r.peek()) || std::isdigit(r.peek()))
-    return nullptr;
+    return "";
 
   std::string name;
   while (pred(r.peek()))
     name.push_back(r.getc());
+  return name;
+}
+
+static Symbol *symbol(Reader &r)
+{
+  std::string name = identifier(r);
   return name.size() ? new Symbol(name) : nullptr;
 }
 

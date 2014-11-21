@@ -13,6 +13,7 @@
 struct SExpr
 {
   bool is_sym = false;
+  bool is_list = false;
 
   // Each SEXpr defines how to generate its own code.
   virtual llvm::Value *codegen(Llvm&) = 0;
@@ -58,7 +59,9 @@ struct List : SExpr
   using Items = std::vector<Item>;
   Items items;
 
-  List(Items is) : items(std::move(is)) { }
+  List(Items is) : items(std::move(is)) {
+    is_list = true;
+  }
 
   llvm::Value *codegen(Llvm&);
 };
@@ -69,6 +72,7 @@ struct If : SExpr
 {
   SExprPtr cond, t, f;
 
+  If(SExpr* cond, SExpr* t, SExpr* f) : cond(cond), t(t), f(f) { }
   If(SExprPtr cond, SExprPtr t, SExprPtr f)
     : cond(std::move(cond)), t(std::move(t)), f(std::move(f))
   {
@@ -84,6 +88,49 @@ struct Setq : SExpr
 
   Setq(std::string ident, SExprPtr e)
     : ident(std::move(ident)), expr(std::move(e))
+  {
+  }
+
+  llvm::Value *codegen(Llvm&);
+};
+
+enum LispType {
+  NONE, VOID, INT, STRING
+};
+
+struct Declfun : SExpr
+{
+  std::string name;
+  LispType returnType = NONE;
+  std::vector<LispType> args;
+
+  Declfun(std::string name) : name(std::move(name)) {}
+
+  bool add_arg(std::string type) {
+    LispType t;
+    if (type == "void") t = VOID;
+    else if (type == "int") t = INT;
+    else if (type == "string") t = STRING;
+    else return false;
+
+    if (returnType == NONE)
+      returnType = t;
+    else
+      args.push_back(t);
+    return true;
+  }
+
+  llvm::Value *codegen(Llvm&);
+};
+
+struct Defun : SExpr
+{
+  std::string name;
+  std::vector<std::string> args;
+  std::vector<SExprPtr> body;
+
+  Defun(std::string n, std::vector<std::string> args, std::vector<SExprPtr> body)
+    : name(std::move(n)), args(std::move(args)), body(std::move(body))
   {
   }
 

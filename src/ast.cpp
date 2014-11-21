@@ -126,9 +126,8 @@ llvm::Value *Symbol::codegen(Llvm &vm)
   exit(1);
 }
 
-llvm::Value *alloc(Llvm &vm, const std::string &ident, SExpr *e)
+llvm::Value *alloc(Llvm &vm, const std::string &ident, llvm::Value *val)
 {
-  llvm::Value *val = e->codegen(vm);
   llvm::AllocaInst *alloc = new llvm::AllocaInst(
       val->getType(), ident, vm.builder.GetInsertBlock()
   );
@@ -144,18 +143,72 @@ llvm::Value *If::codegen(Llvm &vm)
 
 llvm::Value *Setq::codegen(Llvm &vm)
 {
-  return alloc(vm, ident, expr.get());
+  return alloc(vm, ident, expr.get()->codegen(vm));
+}
+
+llvm::Type *lisp_to_vm(Llvm &vm, LispType lt)
+{
+  switch(lt) {
+    case INT:    return vm.intTy();
+    case STRING: return vm.stringTy();
+  }
+
+  std::cerr << "unhandled type" << std::endl;
+  exit(1);
+}
+
+llvm::Value *declfun(Llvm &vm, const std::string& name,
+                     LispType ret, const std::vector<LispType>& args)
+{
+  std::vector<llvm::Type *> vmArgs;
+  for (LispType a : args)
+    vmArgs.push_back(lisp_to_vm(vm, a));
+  auto fty = llvm::FunctionType::get(lisp_to_vm(vm, ret), vmArgs, false);
+  return llvm::Function::Create(fty, llvm::GlobalValue::InternalLinkage,
+                                name, vm.module.get());
+}
+
+llvm::Value *Declfun::codegen(Llvm &vm)
+{
+  return declfun(vm, name, returnType, args);
+}
+
+llvm::Value *Defun::codegen(Llvm &vm)
+{
+  auto f = vm.module->getFunction(name);
+  if (!f) {
+    std::cerr << "unknown function: " << name << std::endl;
+    exit(1);
+  }
+
+  auto b = llvm::BasicBlock::Create(llvm::getGlobalContext(), name + "_block", f);
+  vm.builder.SetInsertPoint(b);
+
+  auto ai = f->arg_begin();    // Function argument iterator.
+  auto ii = std::begin(args);  // Identifier iterator.
+  for (; ai != f->arg_end() && ii != std::end(args); ai++, ii++)
+    alloc(vm, *ii, ai);
+
+  llvm::Value *last = nullptr;
+  for (auto &e : body)
+    last = e->codegen(vm);
+  vm.builder.CreateRet(last);
+
+  // Put back the main insert point.
+  vm.builder.SetInsertPoint(vm.bb);
+
+  // TODO: Undef the local variables.
+
+  return nullptr;
 }
 
 llvm::Value *List::codegen(Llvm &vm)
 {
+  if (items.size() == 1)
+    return items.front()->codegen(vm);
+
   if (items.front()->is_sym) {
     Symbol *sym = static_cast<Symbol *>(items.front().get());
-
-    // Check if it's a defined variable.
-    auto it = vm.vars.find(sym->ident);
-    if (it != std::end(vm.vars))
-      return it->second;
 
     // Maybe a function.
     std::vector<SExpr *> args;
