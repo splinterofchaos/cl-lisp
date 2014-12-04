@@ -9,6 +9,7 @@ static SExpr *atom(Reader &r);
 
 static Declfun *declfun(Reader &r);
 static Defun *defun(Reader &r);
+static Progn *progn(Reader &r);
 
 static SExpr *list(Reader &r);
 static SExpr *list_item(Reader &r);
@@ -87,6 +88,8 @@ static SExpr *list(Reader &r)
   }
   if (id == "defun")
     return defun(r);
+  if (id == "progn")
+    return progn(r);
 
   List::Items items;
   if (id != "") items.emplace_back(new Symbol(std::move(id)));
@@ -154,6 +157,14 @@ static Declfun *declfun(Reader &r)
   return f;
 }
 
+static Progn *progn(Reader &r)
+{
+  std::vector<SExprPtr> body;
+  while(SExpr *e = sexpr(r))
+    body.emplace_back(e);
+  return new Progn("progn", std::move(body));
+}
+
 static Defun *defun(Reader &r)
 {
   std::string name = identifier(r);
@@ -171,13 +182,9 @@ static Defun *defun(Reader &r)
   } else if (earglist) {
     r.error("defun: bad argument list");
   }
+  delete earglist;
 
-  std::vector<SExprPtr> body;
-  SExpr *e;
-  while ((e = sexpr(r)))
-    body.emplace_back(e);
-
-  return new Defun(std::move(name), std::move(args), std::move(body));
+  return new Defun(std::move(name), std::move(args), progn(r));
 }
 
 std::string identifier(Reader &r)

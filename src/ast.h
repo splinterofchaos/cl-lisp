@@ -17,6 +17,8 @@ struct SExpr
 
   // Each SEXpr defines how to generate its own code.
   virtual llvm::Value *codegen(Llvm&) = 0;
+
+  virtual ~SExpr() { }
 };
 
 using SExprPtr = std::unique_ptr<SExpr>;
@@ -123,15 +125,30 @@ struct Declfun : SExpr
   llvm::Value *codegen(Llvm&);
 };
 
+struct Progn : SExpr
+{
+  std::string name;  ///< Optional block name.
+  std::vector<SExprPtr> body;
+
+  Progn(std::vector<SExprPtr> body) : body(std::move(body)) { }
+  Progn(std::string name, std::vector<SExprPtr> body)
+    : body(std::move(body)), name(std::move(name))
+  {
+  }
+
+  llvm::Value *codegen(Llvm&);
+};
+
 struct Defun : SExpr
 {
   std::string name;
   std::vector<std::string> args;
-  std::vector<SExprPtr> body;
+  std::unique_ptr<Progn> prog;
 
-  Defun(std::string n, std::vector<std::string> args, std::vector<SExprPtr> body)
-    : name(std::move(n)), args(std::move(args)), body(std::move(body))
+  Defun(std::string n, std::vector<std::string> args, Progn *body)
+    : name(std::move(n)), args(std::move(args)), prog(body)
   {
+    prog->name = this->name + "_body";
   }
 
   llvm::Value *codegen(Llvm&);

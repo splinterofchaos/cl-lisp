@@ -173,29 +173,56 @@ llvm::Value *Declfun::codegen(Llvm &vm)
   return declfun(vm, name, returnType, args);
 }
 
+llvm::BasicBlock *progn_block(Llvm &vm, Progn& prog,
+                              llvm::Function *f=nullptr,
+                              llvm::BasicBlock *ins=nullptr)
+{
+  auto b = llvm::BasicBlock::Create(llvm::getGlobalContext(), prog.name, f, ins);
+  return b;
+}
+
+llvm::Value *progn_code(Llvm &vm, Progn &prog)
+{
+  llvm::Value *last = nullptr;
+  for (auto &e : prog.body)
+    last = e->codegen(vm);
+  return last;
+}
+
+llvm::Value *Progn::codegen(Llvm &vm)
+{
+  llvm::BasicBlock *p = llvm::BasicBlock::Create(llvm::getGlobalContext(), "progn");
+  llvm::BasicBlock *m = llvm::BasicBlock::Create(llvm::getGlobalContext(), "merge");
+  vm.builder.CreateBr(p);
+  push_block(vm, p);
+  auto v = progn_code(vm, *this);
+  vm.builder.CreateBr(m);
+  push_block(vm, m);
+
+  return v;
+}
+
 llvm::Value *Defun::codegen(Llvm &vm)
 {
+
   auto f = vm.module->getFunction(name);
   if (!f) {
     std::cerr << "unknown function: " << name << std::endl;
     exit(1);
   }
 
-  auto b = llvm::BasicBlock::Create(llvm::getGlobalContext(), name + "_block", f);
-  vm.builder.SetInsertPoint(b);
+  auto ip = vm.builder.GetInsertBlock();
+  vm.builder.SetInsertPoint(progn_block(vm, *prog, f));
 
   auto ai = f->arg_begin();    // Function argument iterator.
   auto ii = std::begin(args);  // Identifier iterator.
   for (; ai != f->arg_end() && ii != std::end(args); ai++, ii++)
     alloc(vm, *ii, ai);
 
-  llvm::Value *last = nullptr;
-  for (auto &e : body)
-    last = e->codegen(vm);
-  vm.builder.CreateRet(last);
+  vm.builder.CreateRet(progn_code(vm, *prog));
 
-  // Put back the main insert point.
-  vm.builder.SetInsertPoint(vm.bb);
+  // Put back the previous insert point.
+  vm.builder.SetInsertPoint(ip);
 
   // TODO: Undef the local variables.
 
