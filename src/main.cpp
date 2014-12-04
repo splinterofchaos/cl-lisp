@@ -12,6 +12,8 @@
 #include <vector>
 #include <map>
 
+#include <llvm/IR/Verifier.h>
+
 #include "ast.h"
 #include "helpers.h"
 #include "llvm.h"
@@ -42,6 +44,9 @@ int main(int argc, char **argv)
     last = e->codegen(vm);
   vm.builder.CreateRet(last);
   vm.module->dump();
+
+  if (!llvm::verifyModule(*vm.module))
+    return 1;
 
   std::string err;
   std::unique_ptr<llvm::ExecutionEngine> ee(
