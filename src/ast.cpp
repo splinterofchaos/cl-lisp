@@ -170,12 +170,20 @@ llvm::Value *call(Llvm &vm, const std::string &fname, const Args &args)
   auto f = vm.module->getFunction(fname);
   if (!f) return nullptr;
 
+  // Build the name for easier IR reading.
+  std::string name;
+
   std::vector<llvm::Value *> fargs;
   for (auto &sexp : args) {
     llvm::Value *val = sexp->codegen(vm);
     fargs.push_back(val);
+
+    if (!name.empty())
+      name.push_back(',');
+    name += val->getName();
   }
-  return vm.builder.CreateCall(f, fargs);
+
+  return vm.builder.CreateCall(f, fargs, twine(fname, "(", name, ")"));
 }
 
 llvm::Value *Symbol::codegen(Llvm &vm)
