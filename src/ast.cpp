@@ -53,10 +53,79 @@ llvm::Value *if_statement(Llvm &vm, SExpr *pred, SExpr *t, SExpr *f)
   return phi;
 }
 
+static void assert_is_int(llvm::Value *v, const char *msg)
+{
+  if (!v->getType()->isIntegerTy()) {
+    std::cerr << msg << std::endl;
+    exit(1);
+  }
+}
+
+template<typename Str>
+llvm::Twine twine(Str &&s)
+{
+  return std::forward<Str>(s);
+}
+
+template<typename S1, typename S2, typename...Str>
+llvm::Twine twine(S1 &&a, S2 &&b, Str &&...str)
+{
+  llvm::Twine t(std::forward<S1>(a));
+  return twine(std::move(t) + std::forward<S2>(b), std::forward<Str>(str)...);
+}
+
+template<typename Args>
+llvm::Value *boolop(Llvm &vm, const std::string &fname, const Args& args)
+{
+  using Maker = llvm::Value *(llvm::IRBuilder<>::*)(llvm::Value *, llvm::Value *,
+                                                    const llvm::Twine &);
+  using OpMap = std::map<std::string, Maker>;
+  static OpMap boolops {
+    {"<",  &llvm::IRBuilder<>::CreateICmpSLT},
+    {"<=", &llvm::IRBuilder<>::CreateICmpSLE},
+    {">",  &llvm::IRBuilder<>::CreateICmpSGT},
+    {">=", &llvm::IRBuilder<>::CreateICmpSGE},
+    {"=",  &llvm::IRBuilder<>::CreateICmpEQ},
+  };
+
+  auto it = boolops.find(fname);
+  if (it == std::end(boolops))
+    return nullptr;
+  auto op = it->second;
+
+  // Applying only one value always returns
+  // Ex: (= 1) = T; (< 1) = T.
+  if (args.size() == 1)
+    return vm.getInt(1, 1);
+
+  llvm::Value *acc = nullptr;
+
+  // Each comparison is made against the previous one.
+  // Ex: (< 1 2 3) = T   => {1 < 2 ^ 2 < 3}
+  //     (< 1 5 4) = NIL => {1 < 5 ^ !(5 < 4)}
+  llvm::Value *last = args.front()->codegen(vm);
+  assert_is_int(last, "boolop on non-int");
+
+  for (size_t i=1; i < args.size(); i++) {
+    llvm::Value *next = args[1]->codegen(vm);
+    assert_is_int(next, "boolop on non-int");
+
+    auto name = twine(last->getName(), it->first, next->getName());
+    acc = (vm.builder.*op)(last, next, name);
+
+    last = next;
+  }
+
+  return acc;
+}
+
 template<typename Args>
 llvm::Value *binop(Llvm &vm, std::string fname,
                    const Args& args)
 {
+  if (auto ret = boolop(vm, fname, args))
+    return ret;
+
   static std::map<std::string, llvm::Instruction::BinaryOps> binops = {
     {"+", llvm::Instruction::Add},
     {"-", llvm::Instruction::Sub},
@@ -74,18 +143,18 @@ llvm::Value *binop(Llvm &vm, std::string fname,
   // LISP operators are chainable. 
   // Ex: (+ 1) = 1; (+ 1 1 1) = 3
   llvm::Value *acc = args[0]->codegen(vm);
+  assert_is_int(acc, "boolop on non-int");
+
   for (int i=1; i < args.size(); i++) {
     llvm::Value *last = args[i]->codegen(vm);
     if (!acc || !last) {
       std::cerr << "binop on NIL" << std::endl;
       exit(1);
     }
-    if (!acc->getType()->isIntegerTy() ||
-        !last->getType()->isIntegerTy()) {
-      std::cerr << "Illegal operation on non-int." << std::endl;
-      exit(1);
-    }
-    acc = vm.builder.CreateBinOp(op, acc, last);
+    assert_is_int(last, "boolop on non-int");
+
+    auto name = twine(acc->getName(), fname, last->getName());
+    acc = vm.builder.CreateBinOp(op, acc, last, name);
   }
   return acc;
 }
