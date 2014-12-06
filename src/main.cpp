@@ -47,6 +47,8 @@ int main(int argc, char **argv)
 
   if (!llvm::verifyModule(*vm.module))
     return 1;
+  if (!llvm::verifyFunction(*vm.prog))
+    return 1;
 
   std::string err;
   std::unique_ptr<llvm::ExecutionEngine> ee(

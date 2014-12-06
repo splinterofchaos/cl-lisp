@@ -9,7 +9,7 @@
 #include <llvm/IR/Value.h>
 #include <llvm/Support/TargetSelect.h>
 
-#include <map>
+#include <vector>
 #include <string>
 
 /// A light wrapper around llvm with just a few helpers.
@@ -23,9 +23,15 @@ struct Llvm
   llvm::Function   *prog;
   llvm::BasicBlock *bb;
 
-  std::map<std::string, llvm::Value *> vars;
+  using Var = std::pair<std::string, llvm::Value *>;
+  std::vector<Var> vars;
 
   Llvm();
+
+  llvm::Value *storeVar(llvm::StringRef, llvm::Value *, bool force=false);
+  llvm::Value *getVar(llvm::StringRef name);
+  void delVar(llvm::StringRef name);
+  void popVar();
 
   llvm::Type *intTy();
   llvm::Value *getInt(int x, size_t size=sizeof(int)*8);

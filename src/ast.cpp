@@ -111,12 +111,11 @@ llvm::Value *call(Llvm &vm, const std::string &fname, const Args &args)
 
 llvm::Value *Symbol::codegen(Llvm &vm)
 {
-  auto it = vm.vars.find(ident);
-  if (it != std::end(vm.vars)) {
-    if (it->second->getType()->isPtrOrPtrVectorTy())
-      return vm.builder.CreateLoad(it->second, ident);
+  if (auto v = vm.getVar(ident)) {
+    if (v->getType()->isPtrOrPtrVectorTy())
+      return vm.builder.CreateLoad(v, ident);
     else
-      return it->second;
+      return v;
   }
 
   if (llvm::Value *v = call(vm, ident, std::vector<SExpr*>{}))
@@ -126,16 +125,6 @@ llvm::Value *Symbol::codegen(Llvm &vm)
   exit(1);
 }
 
-llvm::Value *alloc(Llvm &vm, const std::string &ident, llvm::Value *val)
-{
-  llvm::AllocaInst *alloc = new llvm::AllocaInst(
-      val->getType(), ident, vm.builder.GetInsertBlock()
-  );
-  vm.builder.CreateStore(val, alloc);
-  vm.vars[ident] = alloc;
-  return alloc;
-}
-
 llvm::Value *If::codegen(Llvm &vm)
 {
   return if_statement(vm, cond.get(), t.get(), f.get());
@@ -143,7 +132,9 @@ llvm::Value *If::codegen(Llvm &vm)
 
 llvm::Value *Setq::codegen(Llvm &vm)
 {
-  return alloc(vm, ident, expr.get()->codegen(vm));
+  auto v = expr.get()->codegen(vm);
+  vm.storeVar(ident, v);
+  return v;
 }
 
 llvm::Type *lisp_to_vm(Llvm &vm, LispType lt)
@@ -183,9 +174,16 @@ llvm::BasicBlock *progn_block(Llvm &vm, Progn& prog,
 
 llvm::Value *progn_code(Llvm &vm, Progn &prog)
 {
+  size_t nvars = vm.vars.size();
+
   llvm::Value *last = nullptr;
   for (auto &e : prog.body)
     last = e->codegen(vm);
+
+  // Any variables declared within this block, remove.
+  while (vm.vars.size() > nvars)
+    vm.popVar();
+
   return last;
 }
 
@@ -196,6 +194,7 @@ llvm::Value *Progn::codegen(Llvm &vm)
   vm.builder.CreateBr(p);
   push_block(vm, p);
   auto v = progn_code(vm, *this);
+
   vm.builder.CreateBr(m);
   push_block(vm, m);
 
@@ -214,17 +213,21 @@ llvm::Value *Defun::codegen(Llvm &vm)
   auto ip = vm.builder.GetInsertBlock();
   vm.builder.SetInsertPoint(progn_block(vm, *prog, f));
 
+  size_t nvars = vm.vars.size();
+
   auto ai = f->arg_begin();    // Function argument iterator.
   auto ii = std::begin(args);  // Identifier iterator.
   for (; ai != f->arg_end() && ii != std::end(args); ai++, ii++)
-    alloc(vm, *ii, ai);
+    vm.storeVar(*ii, ai, true);
 
   vm.builder.CreateRet(progn_code(vm, *prog));
 
+  // Any variables declared in this function, remove.
+  while (vm.vars.size() > nvars)
+    vm.popVar();
+
   // Put back the previous insert point.
   vm.builder.SetInsertPoint(ip);
-
-  // TODO: Undef the local variables.
 
   return nullptr;
 }
