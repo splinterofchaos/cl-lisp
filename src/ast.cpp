@@ -188,7 +188,7 @@ llvm::Value *call(Llvm &vm, const std::string &fname, const Args &args)
 
 llvm::Value *Symbol::codegen(Llvm &vm)
 {
-  if (auto v = vm.getVar(ident)) {
+  if (llvm::Value *v = getVar(vm.vars, ident)) {
     if (v->getType()->isPtrOrPtrVectorTy())
       return vm.builder.CreateLoad(v, ident);
     else
@@ -259,7 +259,7 @@ llvm::Value *progn_code(Llvm &vm, Progn &prog)
 
   // Any variables declared within this block, remove.
   while (vm.vars.size() > nvars)
-    vm.popVar();
+    popVar(vm.vars);
 
   return last;
 }
@@ -301,7 +301,7 @@ llvm::Value *Defun::codegen(Llvm &vm)
 
   // Any variables declared in this function, remove.
   while (vm.vars.size() > nvars)
-    vm.popVar();
+    popVar(vm.vars);
 
   // Put back the previous insert point.
   vm.builder.SetInsertPoint(ip);

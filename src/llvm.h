@@ -25,15 +25,11 @@ struct Llvm
   llvm::Function   *prog;
   llvm::BasicBlock *bb;
 
-  using Var = std::pair<std::string, llvm::Value *>;
-  std::vector<Var> vars;
+  VarList<llvm::Value *> vars;
 
   Llvm();
 
   llvm::Value *storeVar(llvm::StringRef, llvm::Value *, bool force=false);
-  llvm::Value *getVar(llvm::StringRef name);
-  void delVar(llvm::StringRef name);
-  void popVar();
 
   llvm::Type *intTy();
   llvm::Value *getInt(int x, size_t size=sizeof(int)*8);
