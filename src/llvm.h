@@ -12,6 +12,8 @@
 #include <vector>
 #include <string>
 
+#include "helpers.h"
+
 /// A light wrapper around llvm with just a few helpers.
 /// (NOT an llvm abstraction.)
 struct Llvm

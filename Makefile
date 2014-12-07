@@ -15,10 +15,10 @@ lisp : $(OBJ)
 build/main.o : src/main.cpp src/helpers.h src/llvm.h src/parser.h
 	$(CXX) $(CXXFLAGS) $(LLVM_CXXFLAGS) $< -c -o $@
 
-build/helpers.o : src/helpers.cpp
+build/helpers.o : src/helpers.cpp src/helpers.h
 	$(CXX) $(CXXFLAGS) $(LLVM_CXXFLAGS) $< -c -o $@
 
-build/llvm.o : src/llvm.cpp
+build/llvm.o : src/llvm.cpp src/ast.h src/helpers.h
 	$(CXX) $(CXXFLAGS) $(LLVM_CXXFLAGS) $< -c -o $@
 
 build/ast.o : src/ast.cpp src/llvm.h src/helpers.h
