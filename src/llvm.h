@@ -13,6 +13,7 @@
 #include <string>
 
 #include "helpers.h"
+#include "ast.h"
 
 /// A light wrapper around llvm with just a few helpers.
 /// (NOT an llvm abstraction.)
@@ -27,15 +28,27 @@ struct Llvm
 
   VarList<llvm::Value *> vars;
 
+  /// A list of every user-defined function.
+  /// When a function is defined, we do not know the type of its arguments or
+  /// result, so we keep the entire AST for future reference.
+  VarList<Defun *> functions;
+
   Llvm();
 
   llvm::Value *storeVar(llvm::StringRef, llvm::Value *, bool force=false);
+
+  // Store an undefined value by its type.
+  llvm::Value *storeVar(llvm::StringRef, llvm::Type *, bool force=false);
 
   llvm::Type *intTy();
   llvm::Value *getInt(int x, size_t size=sizeof(int)*8);
 
   llvm::Type *stringTy() {
     return llvm::Type::getInt8PtrTy(llvm::getGlobalContext());
+  }
+
+  llvm::Type *voidTy() {
+    return llvm::Type::getVoidTy(llvm::getGlobalContext());
   }
 
   template<typename...Args>

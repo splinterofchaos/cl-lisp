@@ -41,7 +41,7 @@ int main(int argc, char **argv)
   msg("Compile:");
   llvm::Value *last;
   for (auto &e : toplevel)
-    last = e->codegen(vm);
+    if (e) last = e->codegen(vm);
   vm.builder.CreateRet(last);
   vm.module->dump();
 

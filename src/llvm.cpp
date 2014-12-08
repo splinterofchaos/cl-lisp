@@ -37,6 +37,18 @@ llvm::Value *Llvm::storeVar(llvm::StringRef name, llvm::Value *val, bool force)
   return alloc;
 }
 
+llvm::Value *Llvm::storeVar(llvm::StringRef name, llvm::Type *ty, bool force)
+{
+  llvm::Value *undef = force ? nullptr : getVar(vars, name);
+
+  if (!undef) {
+    undef = llvm::UndefValue::get(ty);
+    vars.emplace_back(name, undef);
+  }
+
+  return undef;
+}
+
 llvm::Type *Llvm::intTy() {
   return builder.getIntNTy(sizeof(int) * 8);
 }

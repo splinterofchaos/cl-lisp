@@ -1,5 +1,3 @@
-
-(declfun fact int int)
 (defun fact (x)
   (if (> x 1) (* x (fact (- x 1))) (x)))
 
