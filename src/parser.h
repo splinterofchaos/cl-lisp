@@ -7,14 +7,13 @@
 #include <vector>
 
 #include "ast.h"
+#include "helpers.h"
 
 struct Reader
 {
   std::string filename;
   std::istream& source;
   unsigned lnum;
-
-  std::vector<std::unique_ptr<SExpr>> commands;
 
   Reader(std::string name, std::istream& is)
     : source(is)

@@ -7,8 +7,18 @@
 #include <string>
 #include <vector>
 
-#include "llvm.h"
 #include "helpers.h"
+
+#include <llvm/IR/Value.h>
+struct Llvm;  // forward declaration
+
+enum LispType {
+  NONE,  ///< Used to differentiate "not yet typed" from `void`.
+  VOID,
+  INT,
+  STRING,
+  N_LISP_TYPES
+};
 
 struct SExpr
 {
@@ -17,8 +27,11 @@ struct SExpr
 
   // Each SEXpr defines how to generate its own code.
   virtual llvm::Value *codegen(Llvm&) = 0;
-
   virtual ~SExpr() { }
+
+  /// The type of this AST node.
+  // TODO: Use llvm::Type instead of LispType.
+  virtual llvm::Type *ltype(Llvm &) = 0;
 };
 
 using SExprPtr = std::unique_ptr<SExpr>;
@@ -33,6 +46,9 @@ struct Symbol : SExpr
   }
 
   llvm::Value *codegen(Llvm&);
+
+  /// Type deduced by variable lookup.
+  llvm::Type *ltype(Llvm &);
 };
 
 struct String : SExpr
@@ -41,17 +57,17 @@ struct String : SExpr
 
   String(std::string s) : contents(std::move(s)) { }
 
-  llvm::Value *codegen(Llvm &vm) {
-    return vm.builder.CreateGlobalString(contents);
-  }
+  llvm::Value *codegen(Llvm &);
+  llvm::Type  *ltype(Llvm &);
 };
 
 struct Int : SExpr
 {
   int val;
-  Int(int x) : val(x) {}
+  Int(int x) : val(x) { }
 
-  llvm::Value *codegen(Llvm &vm) { return vm.getInt(val); }
+  llvm::Value *codegen(Llvm &);
+  llvm::Type  *ltype(Llvm &);
 };
 
 /// A list of sexprs, like (a b c)
@@ -66,6 +82,7 @@ struct List : SExpr
   }
 
   llvm::Value *codegen(Llvm&);
+  llvm::Type *ltype(Llvm &);
 };
 
 // SPECIAL SYNTAX ITEMS //
@@ -81,6 +98,7 @@ struct If : SExpr
   }
 
   llvm::Value *codegen(Llvm&);
+  llvm::Type *ltype(Llvm &);
 };
 
 struct Setq : SExpr
@@ -94,35 +112,7 @@ struct Setq : SExpr
   }
 
   llvm::Value *codegen(Llvm&);
-};
-
-enum LispType {
-  NONE, VOID, INT, STRING
-};
-
-struct Declfun : SExpr
-{
-  std::string name;
-  LispType returnType = NONE;
-  std::vector<LispType> args;
-
-  Declfun(std::string name) : name(std::move(name)) {}
-
-  bool add_arg(std::string type) {
-    LispType t;
-    if (type == "void") t = VOID;
-    else if (type == "int") t = INT;
-    else if (type == "string") t = STRING;
-    else return false;
-
-    if (returnType == NONE)
-      returnType = t;
-    else
-      args.push_back(t);
-    return true;
-  }
-
-  llvm::Value *codegen(Llvm&);
+  llvm::Type *ltype(Llvm &);
 };
 
 struct Progn : SExpr
@@ -137,6 +127,9 @@ struct Progn : SExpr
   }
 
   llvm::Value *codegen(Llvm&);
+
+  /// Type determined by the last statement.
+  llvm::Type *ltype(Llvm &);
 };
 
 struct Defun : SExpr
@@ -152,4 +145,6 @@ struct Defun : SExpr
   }
 
   llvm::Value *codegen(Llvm&);
+  llvm::Type  *ltype(Llvm &);
 };
+

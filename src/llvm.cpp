@@ -23,7 +23,7 @@ Llvm::Llvm()
 
 llvm::Value *Llvm::storeVar(llvm::StringRef name, llvm::Value *val, bool force)
 {
-  llvm::Value *alloc = force ? nullptr : getVar(name);
+  llvm::Value *alloc = force ? nullptr : getVar(vars, name);
 
   if (!alloc || force) {
     alloc = new llvm::AllocaInst (
@@ -37,29 +37,16 @@ llvm::Value *Llvm::storeVar(llvm::StringRef name, llvm::Value *val, bool force)
   return alloc;
 }
 
-auto findVar(Llvm &vm, llvm::StringRef name)
+llvm::Value *Llvm::storeVar(llvm::StringRef name, llvm::Type *ty, bool force)
 {
-  return std::find_if(vm.vars.rbegin(), vm.vars.rend(),
-                      [&](const Llvm::Var &v) { return v.first == name; });
-}
+  llvm::Value *undef = force ? nullptr : getVar(vars, name);
 
-llvm::Value *Llvm::getVar(llvm::StringRef name)
-{
-  auto it = findVar(*this, name);
-  return it != std::rend(vars) ? it->second : nullptr;
-}
+  if (!undef) {
+    undef = llvm::UndefValue::get(ty);
+    vars.emplace_back(name, undef);
+  }
 
-void Llvm::delVar(llvm::StringRef name)
-{
-  auto it = findVar(*this, name);
-  if (it != std::rend(vars))
-    // Note: reverse_iterator points to the /next/ item.
-    vars.erase(it.base() - 1);
-}
-
-void Llvm::popVar()
-{
-  vars.erase(vars.end() - 1);
+  return undef;
 }
 
 llvm::Type *Llvm::intTy() {

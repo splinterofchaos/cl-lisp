@@ -7,7 +7,6 @@ static Symbol *symbol(Reader &r);
 static Int *num(Reader &r);
 static SExpr *atom(Reader &r);
 
-static Declfun *declfun(Reader &r);
 static Defun *defun(Reader &r);
 static Progn *progn(Reader &r);
 
@@ -83,9 +82,6 @@ static SExpr *list(Reader &r)
     if (!e) r.error("no assignment value");
     return new Setq(std::move(id), std::move(e));
   }
-  if (id == "declfun") {
-    return declfun(r);
-  }
   if (id == "defun")
     return defun(r);
   if (id == "progn")
@@ -141,20 +137,6 @@ String *string(Reader &r) {
     esc = false;
   }
   return new String{std::move(s)};
-}
-
-static Declfun *declfun(Reader &r)
-{
-  std::string name = identifier(r);
-  if (name == "") r.error("declfun: need a function name");
-
-  auto f = new Declfun(std::move(name));
-
-  std::string ty;
-  while (ty = identifier(r), ty != "")
-    f->add_arg(std::move(ty));
-
-  return f;
 }
 
 static Progn *progn(Reader &r)

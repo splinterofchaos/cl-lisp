@@ -1,6 +1,7 @@
 
 #include <string>
 #include <iostream>
+#include <vector>
 
 #include "helpers.h"
 
@@ -14,3 +15,4 @@ std::string quote(char c) {
 
 void msg(const std::string& s) { std::cout << s << std::endl; }
 void msg(const char *s) { std::cout << s << std::endl; }
+
