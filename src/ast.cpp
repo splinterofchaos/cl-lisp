@@ -189,21 +189,11 @@ llvm::Value *if_statement(Llvm &vm, SExpr *pred, SExpr *t, SExpr *f)
   return phi;
 }
 
-llvm::BasicBlock *progn_block(Llvm &vm, Progn& prog,
-                              llvm::Function *f=nullptr,
-                              llvm::BasicBlock *ins=nullptr)
-{
-  auto b = llvm::BasicBlock::Create(llvm::getGlobalContext(), prog.name, f, ins);
-  return b;
-}
-
 llvm::Value *progn_code(Llvm &vm, Progn &prog)
 {
   llvm::Value *last = nullptr;
-  varBlock(vm.vars, [&] {
-    for (auto &e : prog.body)
-      last = e->codegen(vm);
-  });
+  for (auto &e : prog.body)
+    last = e->codegen(vm);
   return last;
 }
 
@@ -340,7 +330,9 @@ llvm::Value *call(Llvm &vm,
 
       // Define the function.
       auto ip = vm.builder.GetInsertBlock();
-      vm.builder.SetInsertPoint(progn_block(vm, *def->prog, f));
+      vm.builder.SetInsertPoint(
+          llvm::BasicBlock::Create(llvm::getGlobalContext(), fname, f)
+      );
 
       varBlock(vm.vars, [&] {
         auto ai = f->arg_begin();         // Function argument iterator.
@@ -420,16 +412,7 @@ llvm::Value *Setq::codegen(Llvm &vm)
 
 llvm::Value *Progn::codegen(Llvm &vm)
 {
-  llvm::BasicBlock *p = llvm::BasicBlock::Create(llvm::getGlobalContext(), "progn");
-  llvm::BasicBlock *m = llvm::BasicBlock::Create(llvm::getGlobalContext(), "merge");
-  vm.builder.CreateBr(p);
-  push_block(vm, p);
-  auto v = progn_code(vm, *this);
-
-  vm.builder.CreateBr(m);
-  push_block(vm, m);
-
-  return v;
+  return progn_code(vm, *this);
 }
 
 llvm::Value *Defun::codegen(Llvm &vm)
