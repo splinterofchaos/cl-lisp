@@ -148,8 +148,13 @@ llvm::Type *Setq::ltype(Llvm &vm) {
 
 llvm::Type *Progn::ltype(Llvm &vm) {
   llvm::Type *ty = nullptr;
-  for (auto &expr : body)
-    ty = expr->ltype(vm);
+
+  // Statements in progn may declare variables that will be replaced when we
+  // call codegen().
+  varBlock(vm.vars, [&] {
+    for (auto &expr : body)
+      ty = expr->ltype(vm);
+  });
   return ty;
 }
 
