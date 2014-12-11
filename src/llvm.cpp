@@ -53,7 +53,14 @@ llvm::Type *Llvm::intTy() {
   return builder.getIntNTy(sizeof(int) * 8);
 }
 
-llvm::Value *Llvm::getInt(int x, size_t size) {
-  return builder.getInt(llvm::APInt(size, x));
+llvm::Type *Llvm::doubleTy() {
+  return builder.getDoubleTy();
 }
 
+llvm::Value *Llvm::getInt(int x, size_t size) {
+  return llvm::ConstantInt::get(module->getContext(), llvm::APInt(size, x));
+}
+
+llvm::Value *Llvm::getDouble(double x) {
+  return llvm::ConstantFP::get(module->getContext(), llvm::APFloat(x));
+}

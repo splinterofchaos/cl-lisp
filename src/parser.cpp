@@ -4,7 +4,7 @@
 static void skipwhite(Reader &r);
 static String *string(Reader &r);
 static Symbol *symbol(Reader &r);
-static Int *num(Reader &r);
+static SExpr *num(Reader &r);
 static SExpr *atom(Reader &r);
 
 static Defun *defun(Reader &r);
@@ -190,13 +190,18 @@ static Symbol *symbol(Reader &r)
   return name.size() ? new Symbol(name) : nullptr;
 }
 
-/// num : Only integers accepted so far.
-static Int *num(Reader &r) {
+static SExpr *num(Reader &r) {
   if (!std::isdigit(r.peek()))
     return nullptr;
 
   int x;
   if (!r.get(x))
-    r.error("couldn't read num");
-  return new Int(x);
+    r.error("couldn't read integer or float");
+  if (r.peek() != '.')
+    return new Int(x);
+
+  double fp = 0;  // Floating part.
+  if (!r.get(fp))
+    r.error("couldn't read float");
+  return new Double(x + fp);
 }

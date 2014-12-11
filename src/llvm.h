@@ -41,7 +41,10 @@ struct Llvm
   llvm::Value *storeVar(llvm::StringRef, llvm::Type *, bool force=false);
 
   llvm::Type *intTy();
+  llvm::Type *doubleTy();
+
   llvm::Value *getInt(int x, size_t size=sizeof(int)*8);
+  llvm::Value *getDouble(double);
 
   llvm::Type *stringTy() {
     return llvm::Type::getInt8PtrTy(llvm::getGlobalContext());

@@ -24,6 +24,7 @@ struct SExpr
 {
   bool is_sym = false;
   bool is_list = false;
+  bool is_string = false;
 
   // Each SEXpr defines how to generate its own code.
   virtual llvm::Value *codegen(Llvm&) = 0;
@@ -55,7 +56,7 @@ struct String : SExpr
 {
   std::string contents;
 
-  String(std::string s) : contents(std::move(s)) { }
+  String(std::string s) : contents(std::move(s)) { is_string = true; }
 
   llvm::Value *codegen(Llvm &);
   llvm::Type  *ltype(Llvm &);
@@ -65,6 +66,15 @@ struct Int : SExpr
 {
   int val;
   Int(int x) : val(x) { }
+
+  llvm::Value *codegen(Llvm &);
+  llvm::Type  *ltype(Llvm &);
+};
+
+struct Double : SExpr
+{
+  double val;
+  Double(double x) : val(x) { }
 
   llvm::Value *codegen(Llvm &);
   llvm::Type  *ltype(Llvm &);

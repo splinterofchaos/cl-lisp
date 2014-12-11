@@ -8,4 +8,6 @@
   (printf "1 = %i\n" x))
 
 (defun hello (str) (printf str))
-(hello "hi\n")
+(hello "hello ")
+(setq str "world\n")
+(hello str)
