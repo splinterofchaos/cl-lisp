@@ -49,17 +49,12 @@ static std::string to_string(llvm::Type *ty) {
 
   switch(ty->getTypeID()) {
     case llvm::Type::VoidTyID:     return "void";
-    case llvm::Type::IntegerTyID:  return "int";
+    case llvm::Type::IntegerTyID:  return ty->isIntegerTy(8) ? "char" : "int";
     case llvm::Type::DoubleTyID:   return "double";
-    case llvm::Type::ArrayTyID:    return to_string(ty->getArrayElementType())
-                                          + "[]";
 
-    case llvm::Type::PointerTyID: {
-      llvm::Type *cnt = ty->getContainedType(0);
-      if (cnt->isIntegerTy(8))
-        return "string";
-      return to_string(cnt) + "*";
-    }
+    case llvm::Type::ArrayTyID:    return to_string(ty->getArrayElementType());
+
+    case llvm::Type::PointerTyID: return to_string(ty->getContainedType(0)) + "*";
 
     default: std::cerr << "unhandled type" << std::endl;
              exit(1);
@@ -498,7 +493,7 @@ llvm::Value *call(Llvm &vm,
 llvm::Value *Symbol::codegen(Llvm &vm)
 {
   if (llvm::Value *v = getVar(vm.vars, ident)) {
-    if (v->getType()->isPtrOrPtrVectorTy())
+    if (v->getType()->isPointerTy())
       return vm.builder.CreateLoad(v, ident);
     else
       return v;
