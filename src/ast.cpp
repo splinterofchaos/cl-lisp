@@ -32,12 +32,33 @@ llvm::Twine twine(S1 &&a, S2 &&b, Str &&...str)
   return twine(std::move(t) + std::forward<S2>(b), std::forward<Str>(str)...);
 }
 
-llvm::Type *lisp_to_vm(Llvm &vm, LispType lt)
+llvm::Type *lisp_to_vm(LispType lt)
 {
+  auto &ctx = llvm::getGlobalContext();
   switch(lt) {
-    case INT:    return vm.intTy();
-    case STRING: return vm.stringTy();
-    case VOID:   return llvm::Type::getVoidTy(llvm::getGlobalContext());
+    case VOID:   return llvm::Type::getVoidTy(ctx);
+    case INT:    return llvm::Type::getIntNTy(ctx, sizeof(int) * 8);
+    case DOUBLE: return llvm::Type::getDoubleTy(ctx);
+    case STRING_LIT: return llvm::Type::getIntNPtrTy(ctx, 8);
+
+    default: std::cerr << "unhandled type: " << std::endl;
+             exit(1);
+  }
+}
+
+LispType vm_to_lisp(llvm::Type *ty) {
+  if (!ty) return NONE;
+
+  switch(ty->getTypeID()) {
+    case llvm::Type::VoidTyID:     return VOID;
+    case llvm::Type::IntegerTyID:  return INT;
+    case llvm::Type::DoubleTyID:   return DOUBLE;
+
+    case llvm::Type::ArrayTyID:    return vm_to_lisp(ty->getArrayElementType());
+
+    case llvm::Type::PointerTyID:
+      ty = ty->getContainedType(0);
+      return ty->isIntegerTy(8) ? STRING_LIT : vm_to_lisp(ty);
 
     default: std::cerr << "unhandled type" << std::endl;
              exit(1);
@@ -61,11 +82,30 @@ static std::string to_string(llvm::Type *ty) {
   }
 }
 
+static std::string to_string(LispType ty) {
+  switch(ty) {
+    case NONE:   return "???";
+    case VOID:   return "void";
+    case NUMBER: return "number";
+    case INT:    return "int";
+    case DOUBLE: return "double";
+    case STRING_LIT: return "string";
+
+    default: std::cerr << "unhandled type" << std::endl;
+             exit(1);
+  }
+}
+
+/// Checks if a type can represent a real value.
+static bool isConcrete(LispType ty) {
+  return ty > NONE && ty != NUMBER && ty != NUMBER_END && ty < N_LISP_TYPES;
+}
+
 /// Mangles a function name for use in overloading.
 /// Ex: (f 1)   => call f:int
 ///     (f 1.0) => call f:double
-static std::string fname_mangle(const std::string &fname,
-                                const std::vector<llvm::Type *> &args) {
+template<typename Args>
+static std::string fname_mangle(const std::string &fname, const Args &args) {
   std::string mangled;
   for (auto a : args) {
     if (mangled.size()) mangled.push_back(',');
@@ -74,7 +114,25 @@ static std::string fname_mangle(const std::string &fname,
   return fname + ":" + mangled;
 }
 
+static bool isNumber(LispType ty) {
+  return ty >= NUMBER && ty < NUMBER_END;
+}
+
+static bool isNumber(llvm::Type *ty) {
+  return ty->isDoubleTy() || ty->isIntegerTy();
+}
+
+static bool isNumber(llvm::Value *ty) {
+  return isNumber(ty->getType());
+}
+
 /// Returns the common type for use in if statement and binary operator codegen.
+static LispType commonType(LispType a, LispType b) {
+  if (isNumber(a))
+    return isNumber(b) ? std::max(a, b) : VOID;
+  return a == b ? a : VOID;
+}
+
 static llvm::Type *commonType(Llvm &vm, llvm::Type *a, llvm::Type *b) {
   a = unPtr(a);
   b = unPtr(b);
@@ -97,52 +155,48 @@ static void push_block(Llvm &vm, llvm::BasicBlock *b) {
 
 // -- L-TYPE -- //
 
-static llvm::Type *functionOrVar(Llvm &vm, const std::string &name) {
+static LispType functionOrVarTy(Llvm &vm, const std::string &name) {
   if (name == "T" || name == "NIL")
-    return vm.intTy();
+    return INT;
 
-  llvm::Type *ty = nullptr;
+  LispType ty = NONE;
 
-  Defun *f = getVar(vm.functions, name);
-  if (f) {
+  if (Defun *f = getVar(vm.functions, name))
     ty = f->ltype(vm);
-  } else {
-    auto *val = getVar(vm.vars, name);
-    if (val) ty = val->getType();
-  }
+  else if(LValue *var = vm.getVar(name))
+    ty = var->ltype;
+
   return ty;
 }
 
-llvm::Type *Symbol::ltype(Llvm &vm) {
-  llvm::Type *ty = functionOrVar(vm, ident);
-  if (ty) ty = unPtr(ty);  // We want the contained type.
-  return ty;
+LispType Symbol::ltype(Llvm &vm) {
+  return functionOrVarTy(vm, ident);
 }
 
-llvm::Type *String::ltype(Llvm &vm) {
-  return vm.stringTy();
+LispType String::ltype(Llvm &) {
+  return STRING_LIT;
 }
 
-llvm::Type *Int::ltype(Llvm &vm) {
-  return vm.intTy();
+LispType Int::ltype(Llvm &) {
+  return INT;
 }
 
-llvm::Type *Double::ltype(Llvm &vm) {
-  return vm.doubleTy();
+LispType Double::ltype(Llvm &vm) {
+  return DOUBLE;
 }
 
-llvm::Type *If::ltype(Llvm &vm) {
-  return commonType(vm, t->ltype(vm), f->ltype(vm));
+LispType If::ltype(Llvm &vm) {
+  return commonType(t->ltype(vm), f->ltype(vm));
 }
 
-llvm::Type *Setq::ltype(Llvm &vm) {
+LispType Setq::ltype(Llvm &vm) {
   auto ty = expr->ltype(vm);
   vm.storeVar(ident, ty);
   return ty;
 }
 
-llvm::Type *Progn::ltype(Llvm &vm) {
-  llvm::Type *ty = nullptr;
+LispType Progn::ltype(Llvm &vm) {
+  LispType ty = NONE;
 
   // Statements in progn may declare variables that will be replaced when we
   // call codegen().
@@ -153,48 +207,52 @@ llvm::Type *Progn::ltype(Llvm &vm) {
   return ty;
 }
 
-llvm::Type *Defun::ltype(Llvm &vm) {
+LispType Defun::ltype(Llvm &vm) {
   return prog->ltype(vm);
 }
 
-llvm::Type *List::ltype(Llvm &vm) {
+LispType List::ltype(Llvm &vm) {
   if (items.size() == 1) return items.front()->ltype(vm);
 
   // A function invocation:
   Symbol *fsym = (Symbol *) items.front().get();
-  if (!fsym || !fsym->is_sym) return nullptr;
+  if (!fsym || !fsym->is_sym) return NONE;
 
   const std::string &name = fsym->ident;
   if (oneOf({"<", ">", "=", "<=", ">="}, name))
-    return vm.intTy();  // TODO: Should be bool.
+    return INT;  // TODO: Should be bool.
 
   if (oneOf({"+", "-", "*", "/"}, name)) {
+    LispType retTy = NUMBER;
     for (size_t i=1; i < items.size(); i++) {
-      llvm::Type *ty = items[i]->ltype(vm);
-      if (!ty) return nullptr;
-      if (unPtr(ty)->isDoubleTy())
-        return vm.doubleTy();
+      auto ty = items[i]->ltype(vm);
+
+      if (!ty)     // Recursively defined functions can't be typed immediately,
+        continue;  // but we can give a guess and error out later if it's wrong.
+
+      retTy = commonType(retTy, ty);
     }
-    return vm.intTy();
+    return retTy;
   }
 
   if (name == "printf")
-    return vm.intTy();
+    return INT;
 
   Defun *def = getVar(vm.functions, fsym->ident);
-  if (!def) return nullptr;
+  if (!def) return NONE;
 
-  std::vector<llvm::Type *> argTys;
+  // TODO: Partial deduction.
+  std::vector<LispType> argTys;
   for (size_t i=1; i < items.size(); i++) {
-    llvm::Type *ty = items[i]->ltype(vm);
-    if (!ty) return nullptr;
+    LispType ty = items[i]->ltype(vm);
+    if (!isConcrete(ty)) return NONE;
     argTys.push_back(ty);
   }
   std::string fname = fname_mangle(fsym->ident, argTys);
 
   // May already be defined.
   if (auto f = vm.module->getFunction(fname))
-    return f->getReturnType();
+    return vm_to_lisp(f->getReturnType());
 
   // To avoid recursion, keep track of all the functions we have tried to
   // deduce the type of.
@@ -202,9 +260,9 @@ llvm::Type *List::ltype(Llvm &vm) {
   if (history.find(fname) == history.end())
     history.insert(fname);
   else
-    return nullptr;
+    return NONE;
 
-  llvm::Type *ty = nullptr;
+  LispType ty = NONE;
   varBlock(vm.vars, [&] {
     for (size_t i=0; i < argTys.size() && i < def->args.size(); i++)
       vm.storeVar(def->args[i], argTys[i]);
@@ -245,7 +303,7 @@ llvm::Value *if_statement(Llvm &vm, SExpr *pred, SExpr *t, SExpr *f)
   llvm::BasicBlock *merge = llvm::BasicBlock::Create(llvm::getGlobalContext(), "merge");
   vm.builder.CreateCondBr(cond, ifso, ifnot);
 
-  auto ty = commonType(vm, t->ltype(vm), f->ltype(vm));
+  auto ty = lisp_to_vm(commonType(t->ltype(vm), f->ltype(vm)));
   auto tcode = if_branch(vm, t, ty, &ifso, merge);
   auto fcode = if_branch(vm, f, ty, &ifnot, merge);
 
@@ -279,8 +337,7 @@ llvm::Value *progn_code(Llvm &vm, Progn &prog)
 
 static bool shouldUseDouble(Llvm &vm, const std::vector<SExpr *> &xs) {
   return std::any_of(xs.begin(), xs.end(),
-                     [&](auto e) { auto ty = e->ltype(vm);
-                                   return ty && unPtr(ty)->isDoubleTy(); });
+                     [&](auto e) { return e->ltype(vm) == DOUBLE; });
 }
 
 template<typename Args>
@@ -314,9 +371,9 @@ llvm::Value *boolop(Llvm &vm, const std::string &fname, const Args& args)
   auto codegen = [&](SExpr *e) {
     llvm::Value *v = e->codegen(vm);
 
-    llvm::Type *ty = v->getType();
-    if (!ty->isDoubleTy() && !ty->isIntegerTy()) {
-      std::cerr << "Error: " << it->first << " on " << to_string(ty) << std::endl;
+    if (!isNumber(v)) {
+      std::cerr << "Error: " << it->first << " on " << std::flush;
+      v->getType()->dump();
       exit(1);
     }
 
@@ -369,10 +426,9 @@ llvm::Value *binop(Llvm &vm, std::string fname,
 
   auto codegen = [&](SExpr *e) {
     llvm::Value *v = e->codegen(vm);
-
-    llvm::Type *ty = v->getType();
-    if (!ty || (!ty->isDoubleTy() && !ty->isIntegerTy())) {
-      std::cerr << "Error: " << it->first << " on " << to_string(ty) << std::endl;
+    if (!isNumber(v)) {
+      std::cerr << "Error: " << it->first << " on "
+                << to_string(v->getType()) << std::endl;
       exit(1);
     }
 
@@ -394,7 +450,7 @@ llvm::Value *binop(Llvm &vm, std::string fname,
 llvm::Value *call(Llvm &vm,
                   std::string fname,
                   const std::vector<SExpr *> &args,
-                  llvm::Type *lty=nullptr)
+                  LispType lty=NONE)
 {
   // Check if this is a binary operation.
   if (llvm::Value *v = binop(vm, fname, args))
@@ -406,13 +462,13 @@ llvm::Value *call(Llvm &vm,
     Defun *def = getVar(vm.functions, fname);
     if (!def) return nullptr;
 
-    std::vector<llvm::Type *> argTys;
+    std::vector<LispType> argTys;
     for (auto a : args) {
-      llvm::Type *ty = a->ltype(vm);
+      LispType ty = a->ltype(vm);
 
-      if (!ty) {
+      if (!isConcrete(ty)) {
         std::cerr << "Cannot define " << fname
-                  << ": argument has no type" << std::endl;
+                  << ": argument is a " << to_string(ty) << std::endl;
         exit(1);
       }
       argTys.push_back(ty);
@@ -426,15 +482,21 @@ llvm::Value *call(Llvm &vm,
         exit(1);
       }
 
+      // Deduce the return type.
+      LispType lty = NONE;
       varBlock(vm.vars, [&] {
-        // Create the function.
         for (size_t i=0; i < args.size() && i < def->args.size(); i++)
           vm.storeVar(def->args[i], argTys[i], true);
-
-        auto fty = llvm::FunctionType::get(def->ltype(vm), argTys, false);
-        f = llvm::Function::Create(fty, llvm::GlobalValue::InternalLinkage,
-                                   fname, vm.module.get());
+        lty = def->ltype(vm);
       });
+
+      std::vector<llvm::Type *> tys;
+      std::transform(argTys.begin(), argTys.end(), std::back_inserter(tys),
+                     lisp_to_vm);
+
+      auto fty = llvm::FunctionType::get(lisp_to_vm(lty), tys, false);
+      f = llvm::Function::Create(fty, llvm::GlobalValue::InternalLinkage,
+                                 fname, vm.module.get());
 
       if (!f) {
         std::cerr << "Could not create function: " << fname << std::endl;
@@ -448,11 +510,13 @@ llvm::Value *call(Llvm &vm,
       );
 
       varBlock(vm.vars, [&] {
-        auto ai = f->arg_begin();         // Function argument iterator.
         auto ii = std::begin(def->args);  // Identifier iterator.
-        for (; ai != f->arg_end() && ii != std::end(def->args); ai++, ii++) {
+        auto ai = f->arg_begin();         // Function argument iterator.
+        auto ti = std::begin(argTys);     // Argument type iterator
+        for (; ai != f->arg_end() && ii != std::end(def->args);
+             ai++, ii++, ti++) {
           ai->setName(*ii);
-          vm.storeVar(*ii, ai, true);
+          vm.storeVar(*ii, ai, *ti, true);
         }
 
         vm.builder.CreateRet(progn_code(vm, *def->prog));
@@ -487,16 +551,16 @@ llvm::Value *call(Llvm &vm,
     resName += val->getName();
   }
 
-  return vm.builder.CreateCall(f, fargs, twine(fname, "(", resName, ")"));
+  return vm.builder.CreateCall(f, fargs, twine(fname, "(" + resName + ")"));
 }
 
 llvm::Value *Symbol::codegen(Llvm &vm)
 {
-  if (llvm::Value *v = getVar(vm.vars, ident)) {
-    if (v->getType()->isPointerTy())
-      return vm.builder.CreateLoad(v, ident);
+  if (LValue *var = vm.getVar(ident)) {
+    if (var->val->getType()->isPointerTy())
+      return vm.builder.CreateLoad(var->val, ident);
     else
-      return v;
+      return var->val;
   }
 
   if (llvm::Value *v = call(vm, ident, {}))
@@ -528,8 +592,8 @@ llvm::Value *If::codegen(Llvm &vm)
 
 llvm::Value *Setq::codegen(Llvm &vm)
 {
-  auto v = expr.get()->codegen(vm);
-  vm.storeVar(ident, v);
+  auto v = expr->codegen(vm);
+  vm.storeVar(ident, v, expr->ltype(vm));
   return v;
 }
 

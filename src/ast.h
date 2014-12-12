@@ -15,8 +15,14 @@ struct Llvm;  // forward declaration
 enum LispType {
   NONE,  ///< Used to differentiate "not yet typed" from `void`.
   VOID,
-  INT,
-  STRING,
+
+  NUMBER,
+  INT, DOUBLE,
+  NUMBER_END,
+
+  STRING_LIT,  ///< A string literal.
+  FUNCTION,
+
   N_LISP_TYPES
 };
 
@@ -31,8 +37,7 @@ struct SExpr
   virtual ~SExpr() { }
 
   /// The type of this AST node.
-  // TODO: Use llvm::Type instead of LispType.
-  virtual llvm::Type *ltype(Llvm &) = 0;
+  virtual LispType ltype(Llvm &) = 0;
 };
 
 using SExprPtr = std::unique_ptr<SExpr>;
@@ -49,7 +54,7 @@ struct Symbol : SExpr
   llvm::Value *codegen(Llvm&);
 
   /// Type deduced by variable lookup.
-  llvm::Type *ltype(Llvm &);
+  LispType ltype(Llvm &);
 };
 
 struct String : SExpr
@@ -59,7 +64,7 @@ struct String : SExpr
   String(std::string s) : contents(std::move(s)) { is_string = true; }
 
   llvm::Value *codegen(Llvm &);
-  llvm::Type  *ltype(Llvm &);
+  LispType ltype(Llvm &);
 };
 
 struct Int : SExpr
@@ -68,7 +73,7 @@ struct Int : SExpr
   Int(int x) : val(x) { }
 
   llvm::Value *codegen(Llvm &);
-  llvm::Type  *ltype(Llvm &);
+  LispType ltype(Llvm &);
 };
 
 struct Double : SExpr
@@ -77,7 +82,7 @@ struct Double : SExpr
   Double(double x) : val(x) { }
 
   llvm::Value *codegen(Llvm &);
-  llvm::Type  *ltype(Llvm &);
+  LispType ltype(Llvm &);
 };
 
 /// A list of sexprs, like (a b c)
@@ -92,7 +97,7 @@ struct List : SExpr
   }
 
   llvm::Value *codegen(Llvm&);
-  llvm::Type *ltype(Llvm &);
+  LispType ltype(Llvm &);
 };
 
 // SPECIAL SYNTAX ITEMS //
@@ -108,7 +113,7 @@ struct If : SExpr
   }
 
   llvm::Value *codegen(Llvm&);
-  llvm::Type *ltype(Llvm &);
+  LispType ltype(Llvm &);
 };
 
 struct Setq : SExpr
@@ -122,7 +127,7 @@ struct Setq : SExpr
   }
 
   llvm::Value *codegen(Llvm&);
-  llvm::Type *ltype(Llvm &);
+  LispType ltype(Llvm &);
 };
 
 struct Progn : SExpr
@@ -139,7 +144,7 @@ struct Progn : SExpr
   llvm::Value *codegen(Llvm&);
 
   /// Type determined by the last statement.
-  llvm::Type *ltype(Llvm &);
+  LispType ltype(Llvm &);
 };
 
 struct Defun : SExpr
@@ -155,6 +160,6 @@ struct Defun : SExpr
   }
 
   llvm::Value *codegen(Llvm&);
-  llvm::Type  *ltype(Llvm &);
+  LispType ltype(Llvm &);
 };
 

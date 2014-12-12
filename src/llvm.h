@@ -15,6 +15,12 @@
 #include "helpers.h"
 #include "ast.h"
 
+/// Stores the information for a lisp value.
+struct LValue {
+  llvm::Value *val;
+  LispType ltype;
+};
+
 /// A light wrapper around llvm with just a few helpers.
 /// (NOT an llvm abstraction.)
 struct Llvm
@@ -26,7 +32,7 @@ struct Llvm
   llvm::Function   *prog;
   llvm::BasicBlock *bb;
 
-  VarList<llvm::Value *> vars;
+  VarList<LValue> vars;
 
   /// A list of every user-defined function.
   /// When a function is defined, we do not know the type of its arguments or
@@ -35,10 +41,15 @@ struct Llvm
 
   Llvm();
 
-  llvm::Value *storeVar(llvm::StringRef, llvm::Value *, bool force=false);
+  llvm::Value *storeVar(llvm::StringRef, llvm::Value *, LispType,
+                        bool force=false);
 
   // Store an undefined value by its type.
-  llvm::Value *storeVar(llvm::StringRef, llvm::Type *, bool force=false);
+  llvm::Value *storeVar(llvm::StringRef name, LispType ty, bool force=false) {
+    return storeVar(name, nullptr, ty, force);
+  }
+
+  LValue *getVar(llvm::StringRef);
 
   llvm::Type *intTy();
   llvm::Type *doubleTy();

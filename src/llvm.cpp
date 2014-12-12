@@ -17,36 +17,35 @@ Llvm::Llvm()
     LLVMLinkInInterpreter();
   }
 
-  storeVar("T", getInt(1, 1));
-  storeVar("NIL", getInt(0, 1));
+  storeVar("T", getInt(1, 1), INT);
+  storeVar("NIL", getInt(0, 1), INT);
 }
 
-llvm::Value *Llvm::storeVar(llvm::StringRef name, llvm::Value *val, bool force)
+llvm::Value *Llvm::storeVar(llvm::StringRef name,
+                            llvm::Value *val, LispType ty,
+                            bool force)
 {
-  llvm::Value *alloc = force ? nullptr : getVar(vars, name);
+  LValue *lval = force ? nullptr : getVar(name);
 
-  if (!alloc || force) {
-    alloc = new llvm::AllocaInst (
-        val->getType(), llvm::Twine(name, ".alloc"), builder.GetInsertBlock()
+  if (!lval) {
+    llvm::Value *alloc = !val ? nullptr : new llvm::AllocaInst (
+        val->getType(),
+        llvm::Twine(name, ".alloc"),
+        builder.GetInsertBlock()
     );
-    vars.emplace_back(std::move(name), alloc);
+    vars.emplace_back(name, LValue{alloc, ty});
+    lval = &vars.back().second;
   }
 
-  builder.CreateStore(val, alloc);
+  llvm::Value *ptr = lval->val;
+  if (val) builder.CreateStore(val, ptr);
 
-  return alloc;
+  return ptr;
 }
 
-llvm::Value *Llvm::storeVar(llvm::StringRef name, llvm::Type *ty, bool force)
-{
-  llvm::Value *undef = force ? nullptr : getVar(vars, name);
-
-  if (!undef) {
-    undef = llvm::UndefValue::get(ty);
-    vars.emplace_back(name, undef);
-  }
-
-  return undef;
+LValue *Llvm::getVar(llvm::StringRef name) {
+  auto it = findVar(vars, name);
+  return it != std::end(vars) ? &it->second : nullptr;
 }
 
 llvm::Type *Llvm::intTy() {
