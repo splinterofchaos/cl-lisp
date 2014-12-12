@@ -449,8 +449,7 @@ llvm::Value *binop(Llvm &vm, std::string fname,
 
 llvm::Value *call(Llvm &vm,
                   std::string fname,
-                  const std::vector<SExpr *> &args,
-                  LispType lty=NONE)
+                  const std::vector<SExpr *> &args)
 {
   // Check if this is a binary operation.
   if (llvm::Value *v = binop(vm, fname, args))
@@ -477,11 +476,6 @@ llvm::Value *call(Llvm &vm,
 
     f = vm.module->getFunction(fname);
     if (!f) {
-      if (!lty) {
-        std::cerr << "Unknown return type for " << fname << std::endl;
-        exit(1);
-      }
-
       // Deduce the return type.
       LispType lty = NONE;
       varBlock(vm.vars, [&] {
@@ -620,7 +614,7 @@ llvm::Value *List::codegen(Llvm &vm)
     std::vector<SExpr *> args;
     for (size_t i = 1; i < items.size(); i++)
       args.push_back(items[i].get());
-    if (llvm::Value *v = call(vm, sym->ident, args, ltype(vm)))
+    if (llvm::Value *v = call(vm, sym->ident, args))
       return v;
 
     std::cerr << "Unknown function or variable: " << sym->ident << std::endl;
