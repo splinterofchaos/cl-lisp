@@ -455,8 +455,10 @@ llvm::Value *call(Llvm &vm,
       varBlock(vm.vars, [&] {
         auto ai = f->arg_begin();         // Function argument iterator.
         auto ii = std::begin(def->args);  // Identifier iterator.
-        for (; ai != f->arg_end() && ii != std::end(def->args); ai++, ii++)
+        for (; ai != f->arg_end() && ii != std::end(def->args); ai++, ii++) {
+          ai->setName(*ii);
           vm.storeVar(*ii, ai, true);
+        }
 
         vm.builder.CreateRet(progn_code(vm, *def->prog));
       });

@@ -27,7 +27,7 @@ llvm::Value *Llvm::storeVar(llvm::StringRef name, llvm::Value *val, bool force)
 
   if (!alloc || force) {
     alloc = new llvm::AllocaInst (
-        val->getType(), name, builder.GetInsertBlock()
+        val->getType(), llvm::Twine(name, ".alloc"), builder.GetInsertBlock()
     );
     vars.emplace_back(std::move(name), alloc);
   }
