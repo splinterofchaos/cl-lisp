@@ -31,12 +31,13 @@ SExpr *sexpr(Reader &r) {
   if (c == EOF)
     return nullptr;
   if (c == '(') {
+    SourcePos p = r.pos();
     r.getc();
     r.depth++;
     SExpr *e = sexpr(r);
     skipwhite(r);
     if (e && (c = r.getc()) != ')')
-      r.error("unterminated expression");
+      r.error(p, "unterminated expression");
     r.depth--;
     return e;
   } else if (c == ')') {

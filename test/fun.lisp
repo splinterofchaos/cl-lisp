@@ -10,4 +10,4 @@
 (defun hello (str) (printf str))
 (hello "hello ")
 (setq str "world\n")
-(hello str)
+(hello str);
