@@ -235,8 +235,9 @@ LispType List::ltype(Llvm &vm) {
     return retTy;
   }
 
-  if (name == "printf")
-    return INT;
+  // May already an external function like "printf". (Imported in main().)
+  if (auto f = vm.module->getFunction(name))
+    return vm_to_lisp(f->getReturnType());
 
   Defun *def = getVar(vm.functions, fsym->ident);
   if (!def) return NONE;
@@ -250,7 +251,7 @@ LispType List::ltype(Llvm &vm) {
   }
   std::string fname = fname_mangle(fsym->ident, argTys);
 
-  // May already be defined.
+  // May have already defined this.
   if (auto f = vm.module->getFunction(fname))
     return vm_to_lisp(f->getReturnType());
 
