@@ -128,6 +128,10 @@ static bool isNumber(llvm::Value *ty) {
 
 /// Returns the common type for use in if statement and binary operator codegen.
 static LispType commonType(LispType a, LispType b) {
+  // A type of 0 may mean a failure to type due to recursion, in which case,
+  // the other type represents the non-recursive branch.
+  if (!a) return b;
+  if (!b) return a;
   if (isNumber(a))
     return isNumber(b) ? std::max(a, b) : VOID;
   return a == b ? a : VOID;
