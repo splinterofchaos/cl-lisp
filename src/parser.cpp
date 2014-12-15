@@ -1,21 +1,6 @@
 
 #include "parser.h"
 
-static void skipwhite(Reader &r);
-static String *string(Reader &r);
-static Symbol *symbol(Reader &r);
-static SExpr *num(Reader &r);
-static SExpr *atom(Reader &r);
-
-static Defun *defun(Reader &r);
-static Progn *progn(Reader &r);
-
-static SExpr *list(Reader &r);
-static SExpr *list_item(Reader &r);
-
-static std::string identifier(Reader &r);
-
-
 // A simple helper.
 static void skipwhite(Reader &r) {
   while (std::isspace(r.peek())) {
@@ -23,52 +8,132 @@ static void skipwhite(Reader &r) {
   }
 }
 
-/// sexpr : a top level expression of the form "(expr)" or "expr"
-SExpr *sexpr(Reader &r) {
-  skipwhite(r);
-
-  char c = r.peek();
-  if (c == EOF)
-    return nullptr;
-  if (c == '(') {
-    SourcePos p = r.pos();
-    r.getc();
-    r.depth++;
-    SExpr *e = sexpr(r);
-    skipwhite(r);
-    if (e && (c = r.getc()) != ')')
-      r.error(p, "unterminated expression");
-    r.depth--;
-    return e;
-  } else if (c == ')') {
-    if (r.depth == 0)
-      r.error("unmatched ')'");
-    else
-      return nullptr;
+Lexed Reader::lex()
+{
+  if (unlexed) {
+    Lexed l = std::move(*unlexed);
+    unlexed = {};
+    return l;
   }
 
-  if (r.depth == 0)
-    r.error("Error: expression cannot be at top level");
+  skipwhite(*this);
+  SourcePos start = pos();
 
-  return list(r);
+  std::string contents;
+  Lexed::Token t = Lexed::NOTHING;
+  switch (char c = peek() ) {
+    case '(':
+    case ')': getc();
+              return Lexed(pos(), c, c == '(' ? Lexed::OPEN : Lexed::CLOSE);
+
+    case ';': do { getc(); }
+              while (peek() != EOF && peek() != '\n');
+              return lex();
+
+    case '"': {
+      getc();  // Eat the starting quote.
+
+      bool esc;  // True if the last character equalled '\'.
+      char c;    // The current char being processed.
+      while (c = getc(), c != '"') {
+        if (c == EOF) error("unterminated string");
+        if (esc) {
+          esc = false;
+          if (c == 'n') c = '\n';
+        } else if (c == '\\') {
+          esc = true;
+          continue;
+        }
+        contents.push_back(c);
+      }
+      t = Lexed::STRING;
+      break;
+    }
+
+    case EOF: return Lexed(pos(), 0, Lexed::END);
+
+    default: {
+      // A number or identifier.
+      auto pred = [](char c) -> bool {
+        return !oneOf({'(', ')', '"'}, c) && std::isgraph(c);
+      };
+      if (!pred(peek())) error(std::string("Can't lex ") + peek());
+
+      SourcePos b = pos();
+      while (pred(peek())) contents.push_back(getc());
+
+      t = Lexed::IDENTIFIER;
+
+      // Disambiguate the overloaded std::isdigit().
+      auto isdigit = [](char c) { return std::isdigit(c); };
+
+      // Check if this is a number.
+      auto dot = contents.find('.');  // Float, first.
+      if (dot != std::string::npos &&
+          std::all_of(contents.begin(), contents.begin() + dot, isdigit) &&
+          std::all_of(contents.begin() + dot + 1, contents.end(), isdigit))
+        t = Lexed::DOUBLE;
+      else if (std::all_of(contents.begin(), contents.end(), isdigit))
+        t = Lexed::INT;
+    }
+  }
+
+  return Lexed(start, pos(), std::move(contents), t);
+}
+
+static Defun *defun(Reader &r);
+static Progn *progn(Reader &r);
+
+static SExpr *list(Reader &r, Lexed lexed);
+static SExpr *list_item(Reader &r);
+
+/// sexpr : a top level expression of the form "(expr)" or "expr"
+SExpr *sexpr(Reader &r) {
+  Lexed lexed = r.lex();
+  SExpr *e = nullptr;
+  if (lexed.tok == Lexed::OPEN) {
+    r.depth++;
+
+    e = sexpr(r);
+    if (e && r.lex().tok != Lexed::CLOSE)
+      r.error(lexed.start(), "unterminated expression");
+
+    r.depth--;
+    return e;
+  } else if (lexed.tok == Lexed::CLOSE) {
+    if (r.depth == 0) r.error("unmatched ')'");
+    r.unlex(std::move(lexed));
+    return nullptr;
+  } else {
+    e = list(r, std::move(lexed));
+  }
+
+  return e;
 }
 
 static SExpr *list_item(Reader &r)
 {
-  skipwhite(r);
   SExpr *e = nullptr;
-  if (r.peek() == '(')
-    e = sexpr(r);
-  else
-    e = atom(r);
+  Lexed l = r.lex();
+  switch (l.tok) {
+    case Lexed::INT:    e = new Int(std::stoi(l.lexeme)); break;
+    case Lexed::DOUBLE: e = new Double(std::stod(l.lexeme)); break;
+    case Lexed::STRING: e = new String(std::move(l.lexeme)); break;
+    case Lexed::IDENTIFIER: e = new Symbol(std::move(l.lexeme)); break;
+    default: r.unlex(std::move(l));
+             if (l.tok == Lexed::OPEN) e = sexpr(r);
+  }
   return e;
 }
 
-static SExpr *list(Reader &r)
+static SExpr *list(Reader &r, Lexed lexed)
 {
-  skipwhite(r);
+  if (lexed.tok == Lexed::END)
+    return nullptr;
+  if (lexed.tok != Lexed::IDENTIFIER)
+    r.error(lexed.start(), "not a function identifier: " + lexed.lexeme);
 
-  std::string id = identifier(r);
+  const std::string &id = lexed.lexeme;
 
   if (id == "if") {
     SExpr *cond = list_item(r);
@@ -77,11 +142,12 @@ static SExpr *list(Reader &r)
     return new If(cond, t, f);
   }
   if (id == "setq") {
-    id = identifier(r);
-    if (id == "") r.error("invalid or no variable name");
+    Lexed name = r.lex();
+    if (name.tok != Lexed::IDENTIFIER)
+      r.error(name.start(), "invalid or no variable name");
     SExprPtr e(list_item(r));
     if (!e) r.error("no assignment value");
-    return new Setq(std::move(id), std::move(e));
+    return new Setq(std::move(name.lexeme), std::move(e));
   }
   if (id == "defun")
     return defun(r);
@@ -89,55 +155,15 @@ static SExpr *list(Reader &r)
     return progn(r);
 
   List::Items items;
-  if (id != "") items.emplace_back(new Symbol(std::move(id)));
+  items.emplace_back(new Symbol(std::move(id)));
 
-  while (skipwhite(r), r.peek() != EOF && r.peek() != ')') {
-    SExpr *e = list_item(r);
-    if (!e) return nullptr;
+  while (SExpr *e = list_item(r))
     items.emplace_back(e);
-  }
 
   if (items.size() == 1)
     return items.front().release();
 
   return new List(std::move(items));
-}
-
-static SExpr *atom(Reader &r)
-{
-  skipwhite(r);
-  SExpr *ret = num(r);
-  if (!ret)
-    ret = string(r);
-  if (!ret) {
-    ret = symbol(r);
-  }
-  return ret;
-}
-
-String *string(Reader &r) {
-  if (r.peek() != '"')
-    return nullptr;
-  r.getc();
-  std::string s;
-  char c;
-  bool esc = false;
-  while (c = r.getc(), c != '"') {
-    if (c == '\n' || c == EOF)
-      r.error("unterminated string");
-    if (esc) {
-      if (c == 'n')
-        c = '\n';
-      else
-        r.error("unhandled escape seq");
-    } else if (c == '\\') {
-      esc = true;
-      continue;
-    }
-    s.push_back(c);
-    esc = false;
-  }
-  return new String{std::move(s)};
 }
 
 static Progn *progn(Reader &r)
@@ -150,59 +176,24 @@ static Progn *progn(Reader &r)
 
 static Defun *defun(Reader &r)
 {
-  std::string name = identifier(r);
-  if (name == "") r.error("defun: bad or no function name");
+  Lexed fname = r.lex();
+  if (fname.tok != Lexed::IDENTIFIER)
+    r.error(fname.start(), "defun: bad or no function name");
 
-  SExpr *earglist = list_item(r);
+  SourcePos argListBegin = r.pos();
+  if (r.lex().tok != Lexed::OPEN)
+    r.error(argListBegin, "no argument list");
+
   std::vector<std::string> args;
-  if (earglist && earglist->is_list) {
-    for (auto& i : static_cast<List *>(earglist)->items) {
-      if (!i->is_sym) r.error("arguments must be symbols");
-      args.emplace_back(std::move(static_cast<Symbol *>(i.get())->ident));
-    }
-  } else if (earglist && earglist->is_sym) {
-    args.emplace_back(std::move(static_cast<Symbol *>(earglist)->ident));
-  } else if (earglist) {
-    r.error("defun: bad argument list");
+  Lexed arg;
+  while (arg = r.lex(), arg.tok != Lexed::CLOSE) {
+    if (arg.tok == Lexed::END)
+      r.error(argListBegin, "unterminated argument list");
+    if (arg.tok != Lexed::IDENTIFIER)
+      r.error(arg.start(), arg.lexeme + " is not an identifier");
+    args.emplace_back(std::move(arg.lexeme));
   }
-  delete earglist;
 
-  return new Defun(std::move(name), std::move(args), progn(r));
+  return new Defun(std::move(fname.lexeme), std::move(args), progn(r));
 }
 
-std::string identifier(Reader &r)
-{
-  skipwhite(r);
-  auto pred = [](char c) {
-    return c != '(' && c != ')' && c != '"' && std::isgraph(c);
-  };
-  if (!pred(r.peek()) || std::isdigit(r.peek()))
-    return "";
-
-  std::string name;
-  while (pred(r.peek()))
-    name.push_back(r.getc());
-  return name;
-}
-
-static Symbol *symbol(Reader &r)
-{
-  std::string name = identifier(r);
-  return name.size() ? new Symbol(name) : nullptr;
-}
-
-static SExpr *num(Reader &r) {
-  if (!std::isdigit(r.peek()))
-    return nullptr;
-
-  int x;
-  if (!r.get(x))
-    r.error("couldn't read integer or float");
-  if (r.peek() != '.')
-    return new Int(x);
-
-  double fp = 0;  // Floating part.
-  if (!r.get(fp))
-    r.error("couldn't read float");
-  return new Double(x + fp);
-}
