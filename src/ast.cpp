@@ -190,7 +190,7 @@ LispType Double::ltype(Llvm &vm) {
 }
 
 LispType If::ltype(Llvm &vm) {
-  return commonType(t->ltype(vm), f->ltype(vm));
+  return f ? commonType(t->ltype(vm), f->ltype(vm)) : VOID;
 }
 
 LispType Setq::ltype(Llvm &vm) {
@@ -296,7 +296,7 @@ llvm::Value *if_branch(Llvm &vm, SExpr* e, llvm::Type *asType,
   llvm::Value *v = e->codegen(vm);  // Generate the code.
   vm.builder.CreateBr(merge);       // Leave the branch.
   *b = vm.builder.GetInsertBlock(); // Update the block's position.
-  return convert(vm, asType, v);
+  return asType ? convert(vm, asType, v) : v;
 }
 
 llvm::Value *if_statement(Llvm &vm, SExpr *pred, SExpr *t, SExpr *f)
@@ -304,8 +304,17 @@ llvm::Value *if_statement(Llvm &vm, SExpr *pred, SExpr *t, SExpr *f)
   auto cond = pred->codegen(vm);
 
   llvm::BasicBlock *ifso  = llvm::BasicBlock::Create(llvm::getGlobalContext(), "true");
-  llvm::BasicBlock *ifnot = llvm::BasicBlock::Create(llvm::getGlobalContext(), "false");
   llvm::BasicBlock *merge = llvm::BasicBlock::Create(llvm::getGlobalContext(), "merge");
+
+  if (!f) {  // No false branch?
+    vm.builder.CreateCondBr(cond, ifso, merge);
+    if_branch(vm, t, nullptr, &ifso, merge);
+    push_block(vm, merge);
+    return nullptr;
+  }
+
+  llvm::BasicBlock *ifnot = llvm::BasicBlock::Create(llvm::getGlobalContext(), "false");
+
   vm.builder.CreateCondBr(cond, ifso, ifnot);
 
   auto ty = lisp_to_vm(commonType(t->ltype(vm), f->ltype(vm)));
