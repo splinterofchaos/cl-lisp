@@ -302,9 +302,11 @@ llvm::Value *if_branch(Llvm &vm, SExpr* e, llvm::Type *asType,
 llvm::Value *if_statement(Llvm &vm, SExpr *pred, SExpr *t, SExpr *f)
 {
   auto cond = pred->codegen(vm);
+  auto cname = cond->getName();
 
-  llvm::BasicBlock *ifso  = llvm::BasicBlock::Create(llvm::getGlobalContext(), "true");
-  llvm::BasicBlock *merge = llvm::BasicBlock::Create(llvm::getGlobalContext(), "merge");
+  auto &ctx = llvm::getGlobalContext();
+  auto *ifso  = llvm::BasicBlock::Create(ctx, twine("if ", cname));
+  auto *merge = llvm::BasicBlock::Create(ctx, twine("endif ", cname));
 
   if (!f) {  // No false branch?
     vm.builder.CreateCondBr(cond, ifso, merge);
@@ -313,7 +315,7 @@ llvm::Value *if_statement(Llvm &vm, SExpr *pred, SExpr *t, SExpr *f)
     return nullptr;
   }
 
-  llvm::BasicBlock *ifnot = llvm::BasicBlock::Create(llvm::getGlobalContext(), "false");
+  auto *ifnot = llvm::BasicBlock::Create(ctx, twine("if-not ", cname));
 
   vm.builder.CreateCondBr(cond, ifso, ifnot);
 
@@ -335,7 +337,8 @@ llvm::Value *if_statement(Llvm &vm, SExpr *pred, SExpr *t, SExpr *f)
     exit(1);
   }
 
-  llvm::PHINode *phi = vm.builder.CreatePHI(ty, 2, "iftmp");
+  llvm::PHINode *phi = vm.builder.CreatePHI(ty, 2, twine(tcode->getName(), " or ",
+                                                         fcode->getName()));
   phi->addIncoming(tcode, ifso);
   phi->addIncoming(fcode, ifnot);
   return phi;
