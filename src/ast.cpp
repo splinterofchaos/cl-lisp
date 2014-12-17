@@ -277,13 +277,16 @@ LispType List::ltype(Llvm &vm) {
   return ty;
 }
 
-/// Does basic conversion on the value, `v` to the target type, `ty`.
-static llvm::Value *convert(Llvm &vm, llvm::Type *ty, llvm::Value *x) {
-  if (ty->isDoubleTy() && x->getType()->isIntegerTy())
-    return vm.builder.CreateSIToFP(x, ty, twine(x->getName(), ".double"));
-  if (ty->isIntegerTy() && x->getType()->isDoubleTy())
-    return vm.builder.CreateFPToSI(x, ty, twine(x->getName(), ".int"));
-  return x;
+/// Does basic conversion on the value, `src` to the target type, `ty`.
+static llvm::Value *convert(Llvm &vm, llvm::Type *ty, llvm::Value *src) {
+  if (!ty || src->getType() == ty)
+    return src;
+
+  using Cast = llvm::AddrSpaceCastInst;
+  auto op = Cast::getCastOpcode(src, true, ty, true);
+
+  return vm.builder.CreateCast(op, src, ty,
+                               twine(src->getName(), ".", to_string(ty)));
 }
 
 // -- AST CODE -- //
