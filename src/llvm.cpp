@@ -7,7 +7,7 @@ Llvm::Llvm()
 {
   llvm::Type *nil = llvm::Type::getVoidTy(llvm::getGlobalContext());
   prog = llvm::Function::Create(llvm::FunctionType::get(nil, false),
-                                llvm::GlobalValue::InternalLinkage,
+                                llvm::GlobalValue::ExternalLinkage,
                                 "main", module.get());
   bb = llvm::BasicBlock::Create(llvm::getGlobalContext(), "entry", prog);
   builder.SetInsertPoint(bb);
