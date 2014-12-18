@@ -278,12 +278,25 @@ LispType List::ltype(Llvm &vm) {
 }
 
 /// Does basic conversion on the value, `src` to the target type, `ty`.
-static llvm::Value *convert(Llvm &vm, llvm::Type *ty, llvm::Value *src) {
+llvm::Value *convert(Llvm &vm, llvm::Type *ty, llvm::Value *src) {
   if (!ty || src->getType() == ty)
     return src;
 
-  using Cast = llvm::AddrSpaceCastInst;
+  auto srcTy = src->getType();
+
+  using Cast = llvm::CastInst;
   auto op = Cast::getCastOpcode(src, true, ty, true);
+
+  if (!Cast::castIsValid(op, src, ty)) {
+    return src;
+    std::cerr << "Error: Invalid cast\n";
+    std::cerr << "from: " << std::flush;
+    src->dump();
+    src->getType()->dump();
+    std::cerr << "to: " << std::flush;
+    ty->dump();
+    exit(1);
+  }
 
   return vm.builder.CreateCast(op, src, ty,
                                twine(src->getName(), ".", to_string(ty)));
@@ -552,13 +565,14 @@ llvm::Value *call(Llvm &vm,
   std::string resName;
 
   std::vector<llvm::Value *> fargs;
+  auto argTyIt = f->getArgumentList().begin();
   for (auto &sexp : args) {
     llvm::Value *val = sexp->codegen(vm);
     if (!val) {
       std::cerr << "Can't generate code for argument of " << fname << std::endl;
       exit(1);
     }
-    fargs.push_back(val);
+    fargs.push_back(convert(vm, (argTyIt++)->getType(), val));
 
     if (!resName.empty())
       resName.push_back(',');

@@ -22,7 +22,7 @@
 int main(int argc, char **argv)
 {
   Llvm vm;
-  vm.registerExtern(vm.intTy(), "printf", true);
+  vm.registerExtern(vm.intTy(), "printf", true, vm.stringTy());
 
   std::unique_ptr<Reader> r;
   std::ifstream src;
@@ -39,10 +39,10 @@ int main(int argc, char **argv)
     toplevel.emplace_back(e);
 
   msg("Compile:");
-  llvm::Value *last;
+  llvm::Value *last = nullptr;
   for (auto &e : toplevel)
     if (e) last = e->codegen(vm);
-  vm.builder.CreateRet(last);
+  vm.builder.CreateRetVoid();
   vm.module->dump();
 
   if (!llvm::verifyModule(*vm.module))
