@@ -157,6 +157,74 @@ static void push_block(Llvm &vm, llvm::BasicBlock *b) {
   vm.builder.SetInsertPoint(b);
 }
 
+llvm::Value *progn_code(Llvm &vm, Progn &prog)
+{
+  llvm::Value *last = nullptr;
+  for (auto &e : prog.body)
+    last = e->codegen(vm);
+  return last;
+}
+
+llvm::Function *defineFunction(Llvm &vm, Defun *def, const std::string &fname,
+                               const std::vector<LispType> &argTys)
+{
+  // To avoid recursion, keep track of all the functions we have tried to
+  // deduce the type of.
+  static std::set<std::string> history;
+  if (history.find(fname) == history.end())
+    history.insert(fname);
+  else
+    return nullptr;
+
+  auto f = vm.module->getFunction(fname);
+  if (f) return f;
+
+  // Deduce the return type.
+  LispType lty = NONE;
+  varBlock(vm.vars, [&] {
+    for (size_t i=0; i < argTys.size() && i < def->args.size(); i++)
+      vm.storeVar(def->args[i], argTys[i], true);
+    lty = def->ltype(vm);
+  });
+  std::vector<llvm::Type *> tys;
+  std::transform(argTys.begin(), argTys.end(), std::back_inserter(tys),
+                 lisp_to_vm);
+
+  auto fty = llvm::FunctionType::get(lisp_to_vm(lty), tys, false);
+  f = llvm::Function::Create(fty, llvm::GlobalValue::InternalLinkage,
+                             fname, vm.module.get());
+
+  if (!f) {
+    std::cerr << "Could not create function: " << fname << std::endl;
+    exit(1);
+  }
+
+  auto ip = vm.builder.GetInsertBlock();
+  vm.builder.SetInsertPoint(
+      llvm::BasicBlock::Create(llvm::getGlobalContext(), fname, f)
+  );
+
+  varBlock(vm.vars, [&] {
+    auto ii = std::begin(def->args);  // Identifier iterator.
+    auto ai = f->arg_begin();         // Function argument iterator.
+    auto ti = std::begin(argTys);     // Argument type iterator
+    for (; ai != f->arg_end() && ii != std::end(def->args);
+         ai++, ii++, ti++) {
+    ai->setName(*ii);
+    vm.storeVar(*ii, ai, *ti, true);
+    }
+
+    vm.builder.CreateRet(progn_code(vm, *def->prog));
+  });
+
+  // Put back the previous insert point.
+  vm.builder.SetInsertPoint(ip);
+
+  return f;
+}
+
+
+
 // -- L-TYPE -- //
 
 static LispType functionOrVarTy(Llvm &vm, const std::string &name) {
@@ -256,25 +324,9 @@ LispType List::ltype(Llvm &vm) {
   std::string fname = fname_mangle(fsym->ident, argTys);
 
   // May have already defined this.
-  if (auto f = vm.module->getFunction(fname))
-    return vm_to_lisp(f->getReturnType());
-
-  // To avoid recursion, keep track of all the functions we have tried to
-  // deduce the type of.
-  static std::set<std::string> history;
-  if (history.find(fname) == history.end())
-    history.insert(fname);
-  else
-    return NONE;
-
-  LispType ty = NONE;
-  varBlock(vm.vars, [&] {
-    for (size_t i=0; i < argTys.size() && i < def->args.size(); i++)
-      vm.storeVar(def->args[i], argTys[i]);
-    ty = def->ltype(vm);
-  });
-
-  return ty;
+  auto f = vm.module->getFunction(fname);
+  if (!f) f = defineFunction(vm, def, fname, argTys);
+  return f ?  vm_to_lisp(f->getReturnType()) : NONE;
 }
 
 /// Does basic conversion on the value, `src` to the target type, `ty`.
@@ -358,14 +410,6 @@ llvm::Value *if_statement(Llvm &vm, SExpr *pred, SExpr *t, SExpr *f)
   phi->addIncoming(tcode, ifso);
   phi->addIncoming(fcode, ifnot);
   return phi;
-}
-
-llvm::Value *progn_code(Llvm &vm, Progn &prog)
-{
-  llvm::Value *last = nullptr;
-  for (auto &e : prog.body)
-    last = e->codegen(vm);
-  return last;
 }
 
 static bool shouldUseDouble(Llvm &vm, const std::vector<SExpr *> &xs) {
@@ -505,54 +549,12 @@ llvm::Value *call(Llvm &vm,
       }
       argTys.push_back(ty);
     }
+
     fname = fname_mangle(fname, argTys);
-
     f = vm.module->getFunction(fname);
-    if (!f) {
-      // Deduce the return type.
-      LispType lty = NONE;
-      varBlock(vm.vars, [&] {
-        for (size_t i=0; i < args.size() && i < def->args.size(); i++)
-          vm.storeVar(def->args[i], argTys[i], true);
-        lty = def->ltype(vm);
-      });
-
-      std::vector<llvm::Type *> tys;
-      std::transform(argTys.begin(), argTys.end(), std::back_inserter(tys),
-                     lisp_to_vm);
-
-      auto fty = llvm::FunctionType::get(lisp_to_vm(lty), tys, false);
-      f = llvm::Function::Create(fty, llvm::GlobalValue::InternalLinkage,
-                                 fname, vm.module.get());
-
-      if (!f) {
-        std::cerr << "Could not create function: " << fname << std::endl;
-        exit(1);
-      }
-
-      // Define the function.
-      auto ip = vm.builder.GetInsertBlock();
-      vm.builder.SetInsertPoint(
-          llvm::BasicBlock::Create(llvm::getGlobalContext(), fname, f)
-      );
-
-      varBlock(vm.vars, [&] {
-        auto ii = std::begin(def->args);  // Identifier iterator.
-        auto ai = f->arg_begin();         // Function argument iterator.
-        auto ti = std::begin(argTys);     // Argument type iterator
-        for (; ai != f->arg_end() && ii != std::end(def->args);
-             ai++, ii++, ti++) {
-          ai->setName(*ii);
-          vm.storeVar(*ii, ai, *ti, true);
-        }
-
-        vm.builder.CreateRet(progn_code(vm, *def->prog));
-      });
-
-      // Put back the previous insert point.
-      vm.builder.SetInsertPoint(ip);
-
-    }
+    
+    if (!f)
+      defineFunction(vm, def, fname, argTys);
   }
   
   f = vm.module->getFunction(fname);
